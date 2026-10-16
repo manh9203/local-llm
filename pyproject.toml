@@ -1,0 +1,24 @@
+[project]
+name = "local-llm"
+version = "0.1.0"
+description = "Local LLM on Apple Silicon"
+readme = "README.md"
+authors = [
+    { name = "Manh Dinh", email = "manh9203@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "mlx-lm>=0.32.2",
+    "openai>=3.31.0",
+    "pyyaml>=6.0.3",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+]

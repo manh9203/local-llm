@@ -1,0 +1,43 @@
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Model weights and Hugging Face caches
+models/
+checkpoints/
+*.safetensors
+*.gguf
+*.bin
+*.mlx
+
+# Runtime data
+data/
+logs/
+outputs/
+*.log
+
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Open WebUI secrets and runtime data
+.webui_secret_key
+.open-webui/
