@@ -40,7 +40,7 @@ def run_conversation(session, prompts, use_cache):
     stats = []
 
     for prompt in prompts:
-        session.generate(prompt)
+        list(session.stream(prompt))
 
         assert session.last_stats is not None
 
@@ -190,7 +190,7 @@ def test_cache_invalidation(session):
     session.reset()
     session.cache_enabled = True
 
-    session.generate("What is transformer attention?")
+    list(session.stream("What is transformer attention?"))
 
     assert session.prompt_cache is not None
     assert session.cache_size() > 0
@@ -203,7 +203,7 @@ def test_cache_invalidation(session):
     assert session.cached_tokens == []
     assert session.messages == old_messages
 
-    session.generate("What are key vectors?")
+    list(session.stream("What are key vectors?"))
 
     assert session.last_stats["reused_tokens"] == 0
 
@@ -218,7 +218,7 @@ def test_cache_invalidation(session):
     assert session.prompt_cache is None
     assert session.cached_tokens == []
 
-    session.generate("What is transformer attention?")
+    list(session.stream("What is transformer attention?"))
 
     assert session.last_stats["reused_tokens"] == 0
 
@@ -230,18 +230,35 @@ def test_reset_matches_fresh_conversation(session):
     session.reset()
     session.cache_enabled = False
 
-    session.generate(prompt)
+    list(session.stream(prompt))
     expected = session.last_generated_tokens.copy()
 
     session.reset()
     session.cache_enabled = True
 
-    session.generate("Explain Python decorators.")
-    session.generate("Give an example.")
+    list(session.stream("Explain Python decorators."))
+    list(session.stream("Give an example."))
 
     # Reset both conversation history and KV cache.
     session.reset()
-    session.generate(prompt)
+    list(session.stream(prompt))
 
     assert session.last_generated_tokens == expected
     assert session.last_stats["reused_tokens"] == 0
+
+
+def test_stream_cancellation_clears_cache(session):
+    session.reset()
+    session.cache_enabled = True
+
+    stream = session.stream(
+        "Explain transformer attention in detail."
+    )
+
+    next(stream)
+    stream.close()
+
+    assert session.prompt_cache is None
+    assert session.cached_tokens == []
+    assert len(session.messages) == 1
+    assert session.last_stats is None

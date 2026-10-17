@@ -53,7 +53,19 @@ def main():
             continue
 
         try:
-            session.generate(user_input)
+            print("\nAssistant: ", end="", flush=True)
+
+            try:
+                for chunk in session.stream(user_input):
+                    print(chunk, end="", flush=True)
+            except KeyboardInterrupt:
+                print("\n[Generation interrupted]")
+            finally:
+                print()
+
+            if session.last_stats is not None:
+                session.print_stats()
+
         except ValueError as exc:
             print(f"Input error: {exc}")
 

@@ -157,8 +157,10 @@ class ChatSession:
 
         self.cached_tokens = processed_sequence[:size]
 
-    def generate(self, user_input):
+    def stream(self, user_input):
         self.last_generated_tokens = []
+        self.last_stats = None
+
         pending, token_ids = self.prepare_prompt(user_input)
         input_tokens, reused = self.prepare_cache(token_ids)
 
@@ -168,8 +170,6 @@ class ChatSession:
 
         started = perf_counter()
         first_token_seconds = None
-
-        print("\nAssistant: ", end="", flush=True)
 
         try:
             for response in stream_generate(
@@ -185,26 +185,18 @@ class ChatSession:
                 if first_token_seconds is None:
                     first_token_seconds = perf_counter() - started
 
-                print(response.text, end="", flush=True)
                 chunks.append(response.text)
                 generated_tokens.append(int(response.token))
                 last_response = response
 
-        except KeyboardInterrupt:
-            self.clear_cache()
-            print("\n[Generation interrupted]")
-            return
+                yield response.text
 
         except BaseException:
             self.clear_cache()
             raise
 
-        finally:
-            print()
-
         if last_response is None:
             self.clear_cache()
-            print("[No response generated]")
             return
 
         self.last_generated_tokens = generated_tokens.copy()
@@ -226,8 +218,6 @@ class ChatSession:
             "first_token_seconds": first_token_seconds,
             "finish_reason": last_response.finish_reason,
         }
-
-        self.print_stats()
 
     def print_stats(self):
         if self.last_stats is None:

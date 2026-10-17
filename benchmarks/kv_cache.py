@@ -22,7 +22,7 @@ def run_conversation(session, use_cache):
     for prompt in PROMPTS:
         # Suppress assistant text while benchmarking.
         with contextlib.redirect_stdout(io.StringIO()):
-            session.generate(prompt)
+            list(session.stream(prompt))
 
         results.append({
             "stats": session.last_stats.copy(),
