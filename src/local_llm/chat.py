@@ -9,6 +9,8 @@ from mlx_lm.models.cache import (
 )
 from mlx_lm.sample_utils import make_sampler
 
+from local_llm.chat_template import fix_qwen3_chat_template
+
 
 @dataclass(frozen=True)
 class ChatConfig:
@@ -39,6 +41,9 @@ class ChatSession:
         print(f"Loading {config.model_id}...")
         self.model, self.tokenizer = load(config.model_id)
 
+        if not config.enable_thinking:
+            fix_qwen3_chat_template(self.tokenizer)
+
         self.sampler = make_sampler(
             temp=config.temperature,
             top_p=config.top_p,
@@ -63,6 +68,7 @@ class ChatSession:
             }
         ]
         self.clear_cache()
+        self.last_generated_tokens = []
         self.last_stats = None
 
     def tokenize_messages(self, messages):
@@ -165,6 +171,7 @@ class ChatSession:
         self.cached_tokens = processed_sequence[:size]
 
     def generate(self, user_input):
+        self.last_generated_tokens = []
         pending, token_ids = self.prepare_prompt(user_input)
         input_tokens, reused = self.prepare_cache(token_ids)
 
@@ -213,6 +220,7 @@ class ChatSession:
             print("[No response generated]")
             return
 
+        self.last_generated_tokens = generated_tokens.copy()
         self.update_cache(input_tokens, generated_tokens)
 
         self.messages = pending + [
