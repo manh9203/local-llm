@@ -5,7 +5,8 @@ import numpy as np
 import pytest
 from mlx_lm.models.cache import make_prompt_cache
 
-from local_llm.chat import ChatConfig, ChatSession
+from local_llm.config import ChatConfig
+from local_llm.inference.engine import InferenceEngine
 
 RUN_INTEGRATION = os.getenv("RUN_MLX_INTEGRATION") == "1"
 
@@ -28,7 +29,8 @@ def session():
         temperature=0.0,
     )
 
-    return ChatSession(config)
+    engine = InferenceEngine(config)
+    return engine.create_session()
 
 
 def run_conversation(session, prompts, use_cache):

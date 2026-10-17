@@ -21,7 +21,9 @@ def common_prefix_length(a: list[int], b: list[int]) -> int:
     return count
 
 
-class ChatSession:
+class InferenceEngine:
+    """Shared MLX model resources for multiple chat sessions."""
+
     def __init__(self, config: ChatConfig):
         self.config = config
 
@@ -31,17 +33,33 @@ class ChatSession:
         if not config.enable_thinking:
             fix_qwen3_chat_template(self.tokenizer)
 
+        print("Model loaded.")
+
+    def create_session(self) -> "ChatSession":
+        return ChatSession(self)
+
+
+class ChatSession:
+    """Conversation state backed by a shared inference engine."""
+
+    def __init__(self, engine: InferenceEngine):
+        self.engine = engine
+        self.config = engine.config
+
+        # Shared model resources: no additional model loading.
+        self.model = engine.model
+        self.tokenizer = engine.tokenizer
+
         self.sampler = make_sampler(
-            temp=config.temperature,
-            top_p=config.top_p,
-            top_k=config.top_k,
+            temp=self.config.temperature,
+            top_p=self.config.top_p,
+            top_k=self.config.top_k,
         )
 
-        self.cache_enabled = config.use_cache
+        self.cache_enabled = self.config.use_cache
         self.last_stats = None
-        self.reset()
 
-        print("Model loaded. Type /help for commands.")
+        self.reset()
 
     def clear_cache(self):
         self.prompt_cache = None

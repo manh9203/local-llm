@@ -5,7 +5,8 @@ import io
 import statistics
 from dataclasses import replace
 
-from local_llm.chat import ChatConfig, ChatSession
+from local_llm.chat import ChatConfig
+from local_llm.inference.engine import InferenceEngine
 
 PROMPTS = [
     "Explain how transformer attention works in about 100 words.",
@@ -47,7 +48,8 @@ def main():
         max_new_tokens=args.max_tokens,
     )
 
-    session = ChatSession(config)
+    engine = InferenceEngine(config)
+    session = engine.create_session()
 
     results = {"off": [], "on": []}
 

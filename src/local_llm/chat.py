@@ -1,11 +1,10 @@
 from local_llm.config import ChatConfig
-from local_llm.inference.engine import ChatSession
-
-__all__ = ["ChatConfig", "ChatSession", "main"]
+from local_llm.inference.engine import InferenceEngine
 
 
 def main():
-    session = ChatSession(ChatConfig())
+    engine = InferenceEngine(ChatConfig())
+    session = engine.create_session()
 
     print("\nCommands: /help, /clear, /stats, "
           "/cache on, /cache off, /cache reset, /exit")

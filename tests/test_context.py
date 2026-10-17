@@ -1,5 +1,5 @@
-
-from local_llm.chat import ChatConfig, ChatSession
+from local_llm.chat import ChatConfig
+from local_llm.inference.engine import ChatSession
 
 
 def test_context_truncation_removes_oldest_exchange():
