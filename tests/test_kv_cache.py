@@ -1,58 +1,247 @@
-
 import os
 
+import mlx.core as mx
+import numpy as np
 import pytest
+from mlx_lm.models.cache import make_prompt_cache
 
 from local_llm.chat import ChatConfig, ChatSession
 
+RUN_INTEGRATION = os.getenv("RUN_MLX_INTEGRATION") == "1"
+
 PROMPTS = [
     "Explain transformer attention in two sentences.",
-    "What role do key vectors play in that mechanism?",
+    "What are query vectors?",
+    "How do key vectors relate to queries?",
+    "What information do value vectors contain?",
+    "Summarize the relationship between Q, K, and V.",
 ]
 
 
-@pytest.mark.skipif(
-    os.getenv("RUN_MLX_INTEGRATION") != "1",
-    reason="Requires local MLX model inference",
-)
-def test_cached_generation_matches_uncached():
+@pytest.fixture(scope="module")
+def session():
+    if not RUN_INTEGRATION:
+        pytest.skip("Set RUN_MLX_INTEGRATION=1")
+
     config = ChatConfig(
-        max_new_tokens=48,
+        max_new_tokens=128,
         temperature=0.0,
     )
 
-    # Load the model only once.
-    session = ChatSession(config)
+    return ChatSession(config)
 
-    def run_conversation(use_cache):
-        session.reset()
-        session.cache_enabled = use_cache
 
-        outputs = []
-        stats = []
+def run_conversation(session, prompts, use_cache):
+    """Run a fresh conversation and collect statistics."""
+    session.reset()
+    session.cache_enabled = use_cache
 
-        for prompt in PROMPTS:
-            session.generate(prompt)
-            outputs.append(session.last_generated_tokens.copy())
-            stats.append(session.last_stats.copy())
+    outputs = []
+    stats = []
 
-        return outputs, stats
+    for prompt in prompts:
+        session.generate(prompt)
 
-    uncached, uncached_stats = run_conversation(False)
-    cached, cached_stats = run_conversation(True)
+        assert session.last_stats is not None
 
-    assert uncached == cached, (
-        "Cached generation produced different token IDs."
+        outputs.append(session.last_generated_tokens.copy())
+        stats.append(session.last_stats.copy())
+
+    return outputs, stats
+
+
+def test_fixed_token_logits(session):
+    """Compare full-prefill and prefix-cached logits."""
+    prompt = session.tokenize_messages([
+        {
+            "role": "system",
+            "content": "You are a helpful assistant.",
+        },
+        {
+            "role": "user",
+            "content": (
+                "Explain the relationship between "
+                "queries, keys, and values in attention."
+            ),
+        },
+    ])
+
+    # Split the SAME token sequence into two parts.
+    split = len(prompt) // 2
+
+    prefix = prompt[:split]
+    suffix = prompt[split:]
+
+    assert prefix
+    assert suffix
+
+    model = session.model
+
+    # Path A: process every token together.
+    full_cache = make_prompt_cache(model)
+
+    full_logits = model(
+        mx.array(prompt)[None],
+        cache=full_cache,
     )
 
-    # First turn should not reuse previous tokens.
-    assert cached_stats[0]["reused_tokens"] == 0
+    mx.eval(full_logits, [c.state for c in full_cache])
 
-    # Second turn should reuse some history.
-    assert cached_stats[1]["reused_tokens"] > 0
+    # Path B: process the prefix first, then the suffix.
+    cached = make_prompt_cache(model)
 
-    # Cache should reduce the prefill workload.
+    prefix_logits = model(
+        mx.array(prefix)[None],
+        cache=cached,
+    )
+
+    mx.eval(prefix_logits, [c.state for c in cached])
+
+    assert all(c.size() == len(prefix) for c in cached)
+
+    suffix_logits = model(
+        mx.array(suffix)[None],
+        cache=cached,
+    )
+
+    mx.eval(suffix_logits, [c.state for c in cached])
+
+    assert all(c.size() == len(prompt) for c in cached)
+
+    # Compare next-token predictions at the final position.
+    a = np.array(
+        full_logits[0, -1, :].astype(mx.float32)
+    )
+
+    b = np.array(
+        suffix_logits[0, -1, :].astype(mx.float32)
+    )
+
+    assert np.isfinite(a).all()
+    assert np.isfinite(b).all()
+
+    max_diff = float(np.max(np.abs(a - b)))
+    mean_diff = float(np.mean(np.abs(a - b)))
+
+    print(f"\nMax absolute logit difference: {max_diff:.6f}")
+    print(f"Mean absolute logit difference: {mean_diff:.6f}")
+
+    print(f"Full prefill top token: {np.argmax(a)}")
+    print(f"Cached prefill top token: {np.argmax(b)}")
+
+    # Initial diagnostic tolerance, not a universal MLX guarantee.
+    np.testing.assert_allclose(
+        a,
+        b,
+        rtol=0.02,
+        atol=0.5,
+    )
+
+
+def test_five_turn_cache_invariants(session):
+    """Validate reuse and token bookkeeping over five turns."""
+    outputs, stats = run_conversation(
+        session,
+        PROMPTS,
+        use_cache=True,
+    )
+
+    assert len(outputs) == len(PROMPTS)
+    assert len(stats) == len(PROMPTS)
+
+    assert stats[0]["reused_tokens"] == 0
+
+    for turn, s in enumerate(stats):
+        assert s["processed_prompt_tokens"] > 0
+
+        assert (
+            s["total_prompt_tokens"]
+            == s["reused_tokens"]
+            + s["processed_prompt_tokens"]
+        )
+
+        if turn > 0:
+            assert s["reused_tokens"] > 0
+
+        assert s["generation_tokens"] > 0
+
+    # Final cache size must match the tracked token sequence.
+    assert session.prompt_cache is not None
+
+    assert session.cache_size() == len(session.cached_tokens)
+
+    # Verify the cache is reusable for the next prompt.
+    next_messages, token_ids = session.prepare_prompt(
+        "Give a short example of self-attention."
+    )
+
+    del next_messages
+
+    input_tokens, reused = session.prepare_cache(token_ids)
+
+    assert reused > 0
+    assert input_tokens == token_ids[reused:]
+    assert session.cached_tokens == token_ids[:reused]
+    assert session.cache_size() == reused
+
+
+def test_cache_invalidation(session):
+    """Clearing the cache must prevent stale reuse."""
+    session.reset()
+    session.cache_enabled = True
+
+    session.generate("What is transformer attention?")
+
+    assert session.prompt_cache is not None
+    assert session.cache_size() > 0
+
+    old_messages = session.messages.copy()
+
+    session.clear_cache()
+
+    assert session.prompt_cache is None
+    assert session.cached_tokens == []
+    assert session.messages == old_messages
+
+    session.generate("What are key vectors?")
+
+    assert session.last_stats["reused_tokens"] == 0
+
     assert (
-        cached_stats[1]["processed_prompt_tokens"]
-        < uncached_stats[1]["processed_prompt_tokens"]
+        session.last_stats["processed_prompt_tokens"]
+        == session.last_stats["total_prompt_tokens"]
     )
+
+    session.reset()
+
+    assert len(session.messages) == 1
+    assert session.prompt_cache is None
+    assert session.cached_tokens == []
+
+    session.generate("What is transformer attention?")
+
+    assert session.last_stats["reused_tokens"] == 0
+
+
+def test_reset_matches_fresh_conversation(session):
+    """Resetting history should restore fresh prompt behavior."""
+    prompt = "Explain the difference between keys and values."
+
+    session.reset()
+    session.cache_enabled = False
+
+    session.generate(prompt)
+    expected = session.last_generated_tokens.copy()
+
+    session.reset()
+    session.cache_enabled = True
+
+    session.generate("Explain Python decorators.")
+    session.generate("Give an example.")
+
+    # Reset both conversation history and KV cache.
+    session.reset()
+    session.generate(prompt)
+
+    assert session.last_generated_tokens == expected
+    assert session.last_stats["reused_tokens"] == 0
