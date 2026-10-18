@@ -6,7 +6,7 @@ from dataclasses import dataclass
 class ChatConfig:
     model_id: str = "mlx-community/Qwen3-8B-4bit"
     system_prompt: str = "You are a helpful, concise AI assistant."
-    max_context_tokens: int = 4096
+    max_context_tokens: int = 8192
     max_new_tokens: int = 512
     temperature: float = 0.7
     top_p: float = 0.8

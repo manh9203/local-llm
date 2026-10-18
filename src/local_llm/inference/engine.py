@@ -75,6 +75,7 @@ class ChatSession:
         self.clear_cache()
         self.last_generated_tokens = []
         self.last_stats = None
+        self.last_context_stats = None
 
     def tokenize_messages(self, messages):
         return list(self.tokenizer.apply_chat_template(
@@ -85,30 +86,66 @@ class ChatSession:
         ))
 
     def prepare_prompt(self, user_input):
-        pending = self.messages + [
-            {"role": "user", "content": user_input}
-        ]
-
         budget = (
             self.config.max_context_tokens
             - self.config.max_new_tokens
         )
 
-        while True:
-            token_ids = self.tokenize_messages(pending)
+        if budget <= 0:
+            raise ValueError(
+                "max_context_tokens must exceed max_new_tokens"
+            )
 
-            if len(token_ids) <= budget:
-                return pending, token_ids
+        pending = [
+            message.copy()
+            for message in self.messages
+        ]
+        pending.append({
+            "role": "user",
+            "content": user_input,
+        })
 
-            # Keep the system message and latest user message.
+        # Ensure that even the minimum possible prompt fits.
+        minimum_messages = [pending[0], pending[-1]]
+        minimum_tokens = len(
+            self.tokenize_messages(minimum_messages)
+        )
+
+        if minimum_tokens > budget:
+            raise ValueError(
+                "The latest user message is too long for the "
+                f"configured context budget ({budget} input tokens). "
+                f"Minimum prompt requires {minimum_tokens} tokens."
+            )
+
+        # Remove the oldest complete conversation turn.
+        token_ids = self.tokenize_messages(pending)
+
+        original_turns = (len(pending) - 2) // 2
+        original_tokens = len(token_ids)
+        dropped_turns = 0
+
+        while len(token_ids) > budget:
             # Remove the oldest complete user/assistant exchange.
             if len(pending) <= 2:
-                raise ValueError(
-                    "Message exceeds the context budget. "
-                    "Please shorten your input."
+                raise RuntimeError(
+                    "Prompt cannot fit after truncation"
                 )
 
             del pending[1:3]
+            dropped_turns += 1
+            token_ids = self.tokenize_messages(pending)
+
+        self.last_context_stats = {
+            "original_prompt_tokens": original_tokens,
+            "effective_prompt_tokens": len(token_ids),
+            "input_budget": budget,
+            "dropped_turns": dropped_turns,
+            "retained_turns": original_turns - dropped_turns,
+            "truncated": dropped_turns > 0,
+        }
+
+        return pending, token_ids
 
     def cache_size(self):
         if not self.prompt_cache:
