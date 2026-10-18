@@ -10,6 +10,10 @@ from mlx_lm.sample_utils import make_sampler
 
 from local_llm.chat_template import fix_qwen3_chat_template
 from local_llm.config import ChatConfig
+from local_llm.inference.context import (
+    PreparedPrompt,
+    prepare_context,
+)
 
 
 def common_prefix_length(a: list[int], b: list[int]) -> int:
@@ -85,67 +89,25 @@ class ChatSession:
             enable_thinking=self.config.enable_thinking,
         ))
 
-    def prepare_prompt(self, user_input):
-        budget = (
-            self.config.max_context_tokens
-            - self.config.max_new_tokens
+    def prepare_messages(
+        self,
+        messages: list[dict],
+    ) -> PreparedPrompt:
+        return prepare_context(
+            messages=messages,
+            tokenize_messages=self.tokenize_messages,
+            max_context_tokens=self.config.max_context_tokens,
+            max_new_tokens=self.config.max_new_tokens,
         )
 
-        if budget <= 0:
-            raise ValueError(
-                "max_context_tokens must exceed max_new_tokens"
-            )
-
-        pending = [
-            message.copy()
-            for message in self.messages
-        ]
-        pending.append({
-            "role": "user",
-            "content": user_input,
-        })
-
-        # Ensure that even the minimum possible prompt fits.
-        minimum_messages = [pending[0], pending[-1]]
-        minimum_tokens = len(
-            self.tokenize_messages(minimum_messages)
+    def prepare_prompt(self, user_input: str):
+        prepared = self.prepare_messages(
+            self.messages + [
+                {"role": "user", "content": user_input}
+            ]
         )
 
-        if minimum_tokens > budget:
-            raise ValueError(
-                "The latest user message is too long for the "
-                f"configured context budget ({budget} input tokens). "
-                f"Minimum prompt requires {minimum_tokens} tokens."
-            )
-
-        # Remove the oldest complete conversation turn.
-        token_ids = self.tokenize_messages(pending)
-
-        original_turns = (len(pending) - 2) // 2
-        original_tokens = len(token_ids)
-        dropped_turns = 0
-
-        while len(token_ids) > budget:
-            # Remove the oldest complete user/assistant exchange.
-            if len(pending) <= 2:
-                raise RuntimeError(
-                    "Prompt cannot fit after truncation"
-                )
-
-            del pending[1:3]
-            dropped_turns += 1
-            token_ids = self.tokenize_messages(pending)
-
-        self.last_context_stats = {
-            "original_prompt_tokens": original_tokens,
-            "effective_prompt_tokens": len(token_ids),
-            "input_budget": budget,
-            "dropped_turns": dropped_turns,
-            "retained_turns": original_turns - dropped_turns,
-            "truncated": dropped_turns > 0,
-        }
-
-        return pending, token_ids
+        return prepared.messages, prepared.token_ids
 
     def cache_size(self):
         if not self.prompt_cache:
@@ -212,11 +174,14 @@ class ChatSession:
 
         self.cached_tokens = processed_sequence[:size]
 
-    def stream(self, user_input):
+    def stream_prepared(self, prepared: PreparedPrompt):
         self.last_generated_tokens = []
         self.last_stats = None
+        self.last_context_stats = prepared.context_stats
 
-        pending, token_ids = self.prepare_prompt(user_input)
+        pending = prepared.messages
+        token_ids = prepared.token_ids
+
         input_tokens, reused = self.prepare_cache(token_ids)
 
         chunks = []
@@ -255,10 +220,17 @@ class ChatSession:
             return
 
         self.last_generated_tokens = generated_tokens.copy()
-        self.update_cache(input_tokens, generated_tokens)
 
-        self.messages = pending + [
-            {"role": "assistant", "content": "".join(chunks)}
+        self.update_cache(
+            input_tokens,
+            generated_tokens,
+        )
+
+        self.messages = [m.copy() for m in pending] + [
+            {
+                "role": "assistant",
+                "content": "".join(chunks),
+            }
         ]
 
         self.last_stats = {
@@ -273,6 +245,15 @@ class ChatSession:
             "first_token_seconds": first_token_seconds,
             "finish_reason": last_response.finish_reason,
         }
+
+    def stream(self, user_input: str):
+        prepared = self.prepare_messages(
+            self.messages + [
+                {"role": "user", "content": user_input}
+            ]
+        )
+
+        yield from self.stream_prepared(prepared)
 
     def print_stats(self):
         if self.last_stats is None:

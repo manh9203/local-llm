@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+from local_llm.inference.context import prepare_context
 from local_llm.serving.api import create_app
 
 MODEL_ID = "mlx-community/Qwen3-8B-4bit"
@@ -16,13 +17,24 @@ class FakeSession:
         self.prompt_cache = None
         self.cached_tokens = []
 
-    def stream(self, user_input):
-        assert user_input
+    def stream_prepared(self, prepared):
+        self.last_context_stats = prepared.context_stats
+
         yield "Hello"
         yield " from MLX!"
 
+        self.messages = [
+            message.copy()
+            for message in prepared.messages
+        ] + [
+            {
+                "role": "assistant",
+                "content": "Hello from MLX!",
+            }
+        ]
+
         self.last_stats = {
-            "total_prompt_tokens": 10,
+            "total_prompt_tokens": len(prepared.token_ids),
             "generation_tokens": 4,
             "finish_reason": "stop",
         }
@@ -48,6 +60,14 @@ class FakeSession:
             for message in messages
             for c in message["content"]
         ]
+
+    def prepare_messages(self, messages):
+        return prepare_context(
+            messages=messages,
+            tokenize_messages=self.tokenize_messages,
+            max_context_tokens=8192,
+            max_new_tokens=512,
+        )
 
 
 class FakeEngine:
@@ -103,11 +123,23 @@ def test_chat_completion():
         result["choices"][0]["message"]["content"]
         == "Hello from MLX!"
     )
-    assert result["usage"]["total_tokens"] == 14
 
-    # Prior messages exclude the latest user message.
-    assert engine.sessions[0].messages == [
-        {"role": "system", "content": "You are helpful."}
+    usage = result["usage"]
+
+    assert usage["prompt_tokens"] == 21
+    assert usage["completion_tokens"] == 4
+    assert usage["total_tokens"] == (
+        usage["prompt_tokens"] + usage["completion_tokens"]
+    )
+
+    # The preparation session does not modify conversation history.
+    assert engine.sessions[0].messages == []
+
+    # The generation session commits the completed conversation.
+    assert engine.sessions[1].messages == [
+        {"role": "system", "content": "You are helpful."},
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "Hello from MLX!"},
     ]
 
 
@@ -217,11 +249,18 @@ def test_streaming_preserves_request_history():
         )
 
     assert response.status_code == 200
+    assert response.text.rstrip().endswith("data: [DONE]")
 
-    session = engine.sessions[0]
+    # The first session is for prompt preparation.
+    # The last session performs actual generation.
+    session = engine.sessions[-1]
 
     assert session.messages == [
         {"role": "system", "content": "You are helpful."},
         {"role": "user", "content": "First question"},
         {"role": "assistant", "content": "First answer"},
+        {"role": "user", "content": "Follow-up"},
+        {"role": "assistant", "content": "Hello from MLX!"},
     ]
+
+    assert session.last_context_stats.dropped_turns == 0

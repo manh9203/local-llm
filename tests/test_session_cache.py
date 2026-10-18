@@ -58,11 +58,11 @@ def test_reuses_matching_prefix():
         min_prefix_tokens=3,
     )
 
-    first = manager.acquire(messages("hello"))
+    first = manager.acquire(engine.tokenize(messages("hello")))
     populate(first, engine.tokenize(messages("hello")))
     manager.release(first)
 
-    second = manager.acquire(messages("hello world"))
+    second = manager.acquire(engine.tokenize(messages("hello world")))
 
     assert second is first
     assert second.cached_tokens == [
@@ -78,11 +78,11 @@ def test_different_prefix_creates_new_session():
         min_prefix_tokens=3,
     )
 
-    first = manager.acquire(messages("hello"))
+    first = manager.acquire(engine.tokenize(messages("hello")))
     populate(first, engine.tokenize(messages("hello")))
     manager.release(first)
 
-    second = manager.acquire(messages("goodbye"))
+    second = manager.acquire(engine.tokenize(messages("goodbye")))
 
     assert second is not first
     assert len(engine.created) == 2
@@ -97,11 +97,11 @@ def test_eviction_limits_sessions():
         min_prefix_tokens=3,
     )
 
-    first = manager.acquire(messages("hello"))
+    first = manager.acquire(engine.tokenize(messages("hello")))
     populate(first, [1, 2, 3])
     manager.release(first)
 
-    second = manager.acquire(messages("goodbye"))
+    second = manager.acquire(engine.tokenize(messages("goodbye")))
     populate(second, [4, 5, 6])
     manager.release(second)
 
@@ -120,11 +120,11 @@ def test_token_budget_eviction():
         min_prefix_tokens=3,
     )
 
-    first = manager.acquire(messages("hello"))
+    first = manager.acquire(engine.tokenize(messages("hello")))
     populate(first, [1, 2, 3, 4])
     manager.release(first)
 
-    second = manager.acquire(messages("goodbye"))
+    second = manager.acquire(engine.tokenize(messages("goodbye")))
     populate(second, [5, 6, 7, 8])
     manager.release(second)
 
@@ -137,7 +137,7 @@ def test_clear_invalidates_all_caches():
     engine = FakeEngine()
     manager = SessionCacheManager(engine)
 
-    session = manager.acquire(messages("hello"))
+    session = manager.acquire(engine.tokenize(messages("hello")))
     populate(session, [1, 2, 3])
     manager.release(session)
 
@@ -146,3 +146,25 @@ def test_clear_invalidates_all_caches():
     assert manager.sessions == []
     assert session.prompt_cache is None
     assert session.cached_tokens == []
+
+
+def test_cache_selection_uses_prepared_tokens():
+    engine = FakeEngine()
+
+    manager = SessionCacheManager(
+        engine,
+        min_prefix_tokens=3,
+    )
+
+    first = manager.acquire([1, 2, 3, 4, 5])
+    populate(first, [1, 2, 3, 4, 5])
+    manager.release(first)
+
+    # This represents the effective prompt after truncation.
+    # The original untruncated history is irrelevant.
+    prepared_tokens = [1, 2, 3, 9, 10]
+
+    second = manager.acquire(prepared_tokens)
+
+    assert second is first
+    assert second.cached_tokens == [1, 2, 3, 4, 5]

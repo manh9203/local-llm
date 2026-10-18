@@ -7,6 +7,16 @@ from local_llm.config import ChatConfig
 from local_llm.inference.engine import InferenceEngine
 
 
+@pytest.fixture(scope="module")
+def engine():
+    return InferenceEngine(
+        ChatConfig(
+            temperature=0.0,
+            max_new_tokens=64,
+        )
+    )
+
+
 @pytest.mark.skipif(
     os.getenv("RUN_MLX_INTEGRATION") != "1",
     reason="Requires loading an MLX model",
@@ -53,3 +63,38 @@ def test_sessions_share_model_but_not_state():
     assert len(session_a.messages) == 1
     assert len(session_b.messages) == 1
     assert session_a.prompt_cache is None
+
+
+@pytest.mark.skipif(
+    os.getenv("RUN_MLX_INTEGRATION") != "1",
+    reason="Requires loading an MLX model",
+)
+def test_stream_prepared_matches_normal_stream(engine):
+    prompt = "What is a KV cache? Answer briefly."
+
+    session_a = engine.create_session()
+    session_b = engine.create_session()
+
+    prepared = session_b.prepare_messages([
+        {
+            "role": "system",
+            "content": engine.config.system_prompt,
+        },
+        {
+            "role": "user",
+            "content": prompt,
+        },
+    ])
+
+    answer_a = "".join(session_a.stream(prompt))
+    answer_b = "".join(session_b.stream_prepared(prepared))
+
+    assert answer_a == answer_b
+
+    assert session_a.last_stats is not None
+    assert session_b.last_stats is not None
+
+    assert (
+        session_b.last_stats["total_prompt_tokens"]
+        == len(prepared.token_ids)
+    )

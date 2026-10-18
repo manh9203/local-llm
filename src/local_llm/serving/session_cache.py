@@ -26,23 +26,20 @@ class SessionCacheManager:
         # Least recently used -> most recently used.
         self.sessions: list[ChatSession] = []
 
-    def acquire(self, messages: list[dict]) -> ChatSession:
-        """Find a reusable session for the supplied conversation."""
+    def acquire(self, token_ids: list[int]) -> ChatSession:
+        """Select the session with the best cached prefix."""
         best_index = None
         best_prefix = 0
 
-        if self.sessions:
-            token_ids = self.sessions[0].tokenize_messages(messages)
+        for i, session in enumerate(self.sessions):
+            prefix = common_prefix_length(
+                session.cached_tokens,
+                token_ids,
+            )
 
-            for i, session in enumerate(self.sessions):
-                prefix = common_prefix_length(
-                    session.cached_tokens,
-                    token_ids,
-                )
-
-                if prefix > best_prefix:
-                    best_index = i
-                    best_prefix = prefix
+            if prefix > best_prefix:
+                best_index = i
+                best_prefix = prefix
 
         if (
             best_index is not None
@@ -52,8 +49,13 @@ class SessionCacheManager:
         else:
             session = self.engine.create_session()
 
-        # Inherit the conversation history, but not the last user message.
-        session.messages = [m.copy() for m in messages[:-1]]
+        print(
+            f"[Cache lookup] "
+            f"pool={len(self.sessions)} "
+            f"best_prefix={best_prefix} "
+            f"threshold={self.min_prefix_tokens}",
+            flush=True,
+        )
 
         return session
 

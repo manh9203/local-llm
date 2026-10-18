@@ -154,27 +154,27 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
 
         validate_messages(request.messages)
 
-        # The request includes complete conversation history.
+        # Open WebUI sends complete conversation history.
         messages = [
             message.model_dump()
             for message in request.messages
         ]
 
-        # Use the supplied system prompt, or our default.
         if messages[0]["role"] != "system":
-            messages.insert(0, {
-                "role": "system",
-                "content": model_engine.config.system_prompt,
-            })
+            messages.insert(
+                0,
+                {
+                    "role": "system",
+                    "content": model_engine.config.system_prompt,
+                },
+            )
 
-        latest_user_message = messages[-1]["content"]
         cache_manager = app.state.session_cache
 
-        # Validate context before sending any HTTP response.
-        validation_session = model_engine.create_session()
-        validation_session.messages = messages[:-1]
+        # Create a lightweight session object for tokenization.
+        preparation_session = model_engine.create_session()
         try:
-            validation_session.prepare_prompt(latest_user_message)
+            prepared = preparation_session.prepare_messages(messages)
         except ValueError as exc:
             raise HTTPException(
                 status_code=400,
@@ -189,9 +189,9 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
         if not request.stream:
             async with inference_lock:
                 def generate_all():
-                    session = cache_manager.acquire(messages)
+                    session = cache_manager.acquire(prepared.token_ids)
                     try:
-                        with closing(session.stream(latest_user_message)) as stream:
+                        with closing(session.stream_prepared(prepared)) as stream:
                             answer = "".join(stream)
 
                         stats = session.last_stats
@@ -201,15 +201,28 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
                                 detail="Inference did not complete.",
                             )
 
+                        context_stats = session.last_context_stats
+
                         cache_manager.release(session)
 
-                        return answer, stats
+                        return answer, stats, context_stats
                     except BaseException:
                         session.clear_cache()
                         raise
 
-                answer, stats = await anyio.to_thread.run_sync(
+                answer, stats, context_stats = await anyio.to_thread.run_sync(
                     generate_all
+                )
+
+            if context_stats is not None:
+                print(
+                    f"[Context] "
+                    f"original={context_stats.original_tokens} "
+                    f"effective={context_stats.effective_tokens} "
+                    f"budget={context_stats.input_budget} "
+                    f"dropped_turns={context_stats.dropped_turns} "
+                    f"truncated={context_stats.truncated}",
+                    flush=True,
                 )
 
             prompt_tokens = stats["total_prompt_tokens"]
@@ -239,8 +252,8 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
 
         async def events():
             async with inference_lock:
-                session = cache_manager.acquire(messages)
-                stream = session.stream(latest_user_message)
+                session = cache_manager.acquire(prepared.token_ids)
+                stream = session.stream_prepared(prepared)
                 completed = False
 
                 try:
@@ -293,6 +306,18 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
                         )
 
                         if completed and session.last_stats is not None:
+                            context_stats = session.last_context_stats
+                            if context_stats is not None:
+                                print(
+                                    f"[Context] "
+                                    f"original={context_stats.original_tokens} "
+                                    f"effective={context_stats.effective_tokens} "
+                                    f"budget={context_stats.input_budget} "
+                                    f"dropped_turns={context_stats.dropped_turns} "
+                                    f"truncated={context_stats.truncated}",
+                                    flush=True,
+                                )
+
                             cache_manager.release(session)
                         else:
                             session.clear_cache()
