@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from local_llm.config import ChatConfig
 from local_llm.inference.engine import InferenceEngine
+from local_llm.serving.session_cache import SessionCacheManager
 
 
 class ChatMessage(BaseModel):
@@ -99,7 +100,17 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
             engine if engine is not None
             else InferenceEngine(ChatConfig())
         )
+
+        app.state.session_cache = SessionCacheManager(
+            app.state.engine,
+            max_sessions=2,
+            max_cached_tokens=3000,
+            min_prefix_tokens=64,
+        )
+
         yield
+
+        app.state.session_cache.clear()
 
     app = FastAPI(
         title="Local MLX LLM",
@@ -156,41 +167,49 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
                 "content": model_engine.config.system_prompt,
             })
 
-        session = model_engine.create_session()
-
-        # stream() appends the latest user message itself.
-        session.messages = messages[:-1]
         latest_user_message = messages[-1]["content"]
+        cache_manager = app.state.session_cache
 
         # Validate context before sending any HTTP response.
+        validation_session = model_engine.create_session()
+        validation_session.messages = messages[:-1]
         try:
-            session.prepare_prompt(latest_user_message)
+            validation_session.prepare_prompt(latest_user_message)
         except ValueError as exc:
             raise HTTPException(
                 status_code=400,
                 detail=str(exc),
             ) from exc
 
+        # Create metadata for the completion response.
         completion_id = f"chatcmpl-{uuid.uuid4().hex}"
         created = int(time.time())
         model_id = model_engine.config.model_id
 
         if not request.stream:
-            def generate_all():
-                with closing(session.stream(latest_user_message)) as stream:
-                    return "".join(stream)
-
             async with inference_lock:
-                answer = await anyio.to_thread.run_sync(
+                def generate_all():
+                    session = cache_manager.acquire(messages)
+                    try:
+                        with closing(session.stream(latest_user_message)) as stream:
+                            answer = "".join(stream)
+
+                        stats = session.last_stats
+                        if stats is None:
+                            raise HTTPException(
+                                status_code=500,
+                                detail="Inference did not complete.",
+                            )
+
+                        cache_manager.release(session)
+
+                        return answer, stats
+                    except BaseException:
+                        session.clear_cache()
+                        raise
+
+                answer, stats = await anyio.to_thread.run_sync(
                     generate_all
-                )
-
-            stats = session.last_stats
-
-            if stats is None:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Inference did not complete.",
                 )
 
             prompt_tokens = stats["total_prompt_tokens"]
@@ -220,7 +239,9 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
 
         async def events():
             async with inference_lock:
+                session = cache_manager.acquire(messages)
                 stream = session.stream(latest_user_message)
+                completed = False
 
                 try:
                     yield sse_data(completion_chunk(
@@ -237,6 +258,7 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
                         )
 
                         if fragment is _END:
+                            completed = True
                             break
 
                         if fragment:
@@ -252,25 +274,28 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
 
                     stats = session.last_stats
 
-                    if stats is None:
-                        return
-
-                    yield sse_data(completion_chunk(
-                        completion_id,
-                        created,
-                        model_id,
-                        {},
-                        stats["finish_reason"],
-                    ))
-
-                    yield "data: [DONE]\n\n"
+                    if stats is not None:
+                        yield sse_data(completion_chunk(
+                            completion_id,
+                            created,
+                            model_id,
+                            {},
+                            stats["finish_reason"],
+                        ))
+                        yield "data: [DONE]\n\n"
 
                 finally:
-                    # Close an unfinished MLX stream when the response is cancelled.
+                    # Generator cleanup must complete even when the HTTP
+                    # streaming task is cancelled.
                     with anyio.CancelScope(shield=True):
                         await anyio.to_thread.run_sync(
                             stream.close
                         )
+
+                        if completed and session.last_stats is not None:
+                            cache_manager.release(session)
+                        else:
+                            session.clear_cache()
 
         return StreamingResponse(
             events(),

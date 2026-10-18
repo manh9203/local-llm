@@ -12,6 +12,9 @@ class FakeSession:
     def __init__(self):
         self.messages = []
         self.last_stats = None
+        self.cache_enabled = True
+        self.prompt_cache = None
+        self.cached_tokens = []
 
     def stream(self, user_input):
         assert user_input
@@ -31,6 +34,20 @@ class FakeSession:
             ],
             [1, 2, 3],
         )
+
+    def clear_cache(self):
+        self.prompt_cache = None
+        self.cached_tokens = []
+
+    def cache_size(self):
+        return len(self.cached_tokens)
+
+    def tokenize_messages(self, messages):
+        return [
+            ord(c)
+            for message in messages
+            for c in message["content"]
+        ]
 
 
 class FakeEngine:
