@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -22,6 +23,14 @@ class FakeSession:
             "generation_tokens": 4,
             "finish_reason": "stop",
         }
+
+    def prepare_prompt(self, user_input):
+        return (
+            self.messages + [
+                {"role": "user", "content": user_input}
+            ],
+            [1, 2, 3],
+        )
 
 
 class FakeEngine:
@@ -115,17 +124,87 @@ def test_rejects_invalid_conversation():
     assert response.status_code == 400
 
 
-def test_rejects_streaming_for_now():
-    with TestClient(create_app(FakeEngine())) as client:
+def parse_sse_events(body: str):
+    """Parse JSON data events, excluding the DONE marker."""
+    events = []
+
+    for line in body.splitlines():
+        if not line.startswith("data: "):
+            continue
+
+        data = line.removeprefix("data: ")
+
+        if data != "[DONE]":
+            events.append(json.loads(data))
+
+    return events
+
+
+def test_streaming_chat_completion():
+    engine = FakeEngine()
+
+    with TestClient(create_app(engine)) as client:
         response = client.post(
             "/v1/chat/completions",
             json={
                 "model": MODEL_ID,
                 "messages": [
-                    {"role": "user", "content": "Hi"}
+                    {"role": "user", "content": "Hello"}
                 ],
                 "stream": True,
             },
         )
 
-    assert response.status_code == 422
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers["content-type"]
+
+    events = parse_sse_events(response.text)
+
+    assert events[0]["choices"][0]["delta"]["role"] == "assistant"
+
+    content = "".join(
+        event["choices"][0]["delta"].get("content", "")
+        for event in events
+    )
+
+    assert content == "Hello from MLX!"
+
+    assert events[-1]["choices"][0]["finish_reason"] == "stop"
+    assert events[-1]["choices"][0]["delta"] == {}
+
+    assert response.text.rstrip().endswith("data: [DONE]")
+
+    # All events belong to the same completion.
+    assert len({event["id"] for event in events}) == 1
+    assert all(
+        event["object"] == "chat.completion.chunk"
+        for event in events
+    )
+
+
+def test_streaming_preserves_request_history():
+    engine = FakeEngine()
+
+    with TestClient(create_app(engine)) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": MODEL_ID,
+                "messages": [
+                    {"role": "user", "content": "First question"},
+                    {"role": "assistant", "content": "First answer"},
+                    {"role": "user", "content": "Follow-up"},
+                ],
+                "stream": True,
+            },
+        )
+
+    assert response.status_code == 200
+
+    session = engine.sessions[0]
+
+    assert session.messages == [
+        {"role": "system", "content": "You are helpful."},
+        {"role": "user", "content": "First question"},
+        {"role": "assistant", "content": "First answer"},
+    ]
