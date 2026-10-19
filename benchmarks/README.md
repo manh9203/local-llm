@@ -1,4 +1,3 @@
-
 # MLX Local LLM Benchmarks
 
 ## Hardware and model

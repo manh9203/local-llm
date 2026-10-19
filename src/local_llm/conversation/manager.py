@@ -6,7 +6,6 @@ from local_llm.conversation.checkpoint import (
     create_checkpoint,
 )
 
-
 CheckpointKey = tuple[str, int, str, int]
 
 

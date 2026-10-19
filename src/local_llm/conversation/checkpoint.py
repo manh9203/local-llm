@@ -3,7 +3,6 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-
 Message = dict[str, Any]
 
 COMPACTION_VERSION = 1
