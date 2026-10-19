@@ -168,3 +168,49 @@ def test_cache_selection_uses_prepared_tokens():
 
     assert second is first
     assert second.cached_tokens == [1, 2, 3, 4, 5]
+
+
+def test_retains_long_cache():
+    engine = FakeEngine()
+
+    manager = SessionCacheManager(
+        engine,
+        max_sessions=1,
+        max_cached_tokens=8192,
+        min_prefix_tokens=64,
+    )
+
+    tokens = list(range(7000))
+
+    session = manager.acquire(tokens)
+    populate(session, tokens)
+
+    manager.release(session)
+
+    assert manager.sessions == [session]
+    assert len(session.cached_tokens) == 7000
+
+    # A subsequent prompt extends the same prefix.
+    next_session = manager.acquire(tokens + [7000, 7001])
+
+    assert next_session is session
+
+
+def test_rejects_cache_above_budget():
+    engine = FakeEngine()
+
+    manager = SessionCacheManager(
+        engine,
+        max_sessions=1,
+        max_cached_tokens=8192,
+        min_prefix_tokens=64,
+    )
+
+    session = manager.acquire([1, 2, 3])
+    populate(session, list(range(9000)))
+
+    manager.release(session)
+
+    assert manager.sessions == []
+    assert session.prompt_cache is None
+    assert session.cached_tokens == []

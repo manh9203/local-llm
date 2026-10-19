@@ -1,8 +1,12 @@
+import logging
+
 from local_llm.inference.engine import (
     ChatSession,
     InferenceEngine,
     common_prefix_length,
 )
+
+logger = logging.getLogger("local_llm.serving.session_cache")
 
 
 class SessionCacheManager:
@@ -12,7 +16,7 @@ class SessionCacheManager:
         self,
         engine: InferenceEngine,
         max_sessions: int = 2,
-        max_cached_tokens: int = 3000,
+        max_cached_tokens: int = 8192,
         min_prefix_tokens: int = 64,
     ):
         if max_sessions < 1 or max_cached_tokens < 1:
@@ -41,20 +45,23 @@ class SessionCacheManager:
                 best_index = i
                 best_prefix = prefix
 
-        if (
+        hit = (
             best_index is not None
             and best_prefix >= self.min_prefix_tokens
-        ):
+        )
+
+        if hit:
             session = self.sessions.pop(best_index)
         else:
             session = self.engine.create_session()
 
-        print(
-            f"[Cache lookup] "
-            f"pool={len(self.sessions)} "
-            f"best_prefix={best_prefix} "
-            f"threshold={self.min_prefix_tokens}",
-            flush=True,
+        logger.info(
+            "Cache lookup: hit=%s prefix=%d threshold=%d "
+            "available_sessions=%d",
+            hit,
+            best_prefix,
+            self.min_prefix_tokens,
+            len(self.sessions),
         )
 
         return session
@@ -67,16 +74,17 @@ class SessionCacheManager:
             or not session.cached_tokens
             or session.cache_size() != len(session.cached_tokens)
         ):
+            logger.info("Cache rejected: invalid or empty state")
             session.clear_cache()
             return
 
         size = len(session.cached_tokens)
 
         if size > self.max_cached_tokens:
-            print(
-                f"[Cache reject] reason=token_budget "
-                f"size={size} limit={self.max_cached_tokens}",
-                flush=True,
+            logger.info(
+                "Cache rejected: size=%d exceeds limit=%d",
+                size,
+                self.max_cached_tokens,
             )
             session.clear_cache()
             return
@@ -86,6 +94,10 @@ class SessionCacheManager:
         # Evict least recently used sessions.
         while len(self.sessions) > self.max_sessions:
             old = self.sessions.pop(0)
+            logger.info(
+                "Cache evicted: reason=session_limit tokens=%d",
+                len(old.cached_tokens),
+            )
             old.clear_cache()
 
         # Enforce aggregate cached-token budget.
@@ -94,12 +106,17 @@ class SessionCacheManager:
             > self.max_cached_tokens
         ):
             old = self.sessions.pop(0)
-            print(
-                f"[Cache eviction] reason=aggregate_token_budget "
-                f"size={len(old.cached_tokens)}",
-                flush=True,
+            logger.info(
+                "Cache evicted: reason=token_budget tokens=%d",
+                len(old.cached_tokens),
             )
             old.clear_cache()
+
+        logger.info(
+            "Cache retained: sessions=%d total_tokens=%d",
+            len(self.sessions),
+            sum(len(s.cached_tokens) for s in self.sessions),
+        )
 
     def clear(self) -> None:
         for session in self.sessions:

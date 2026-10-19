@@ -111,7 +111,7 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
         app.state.session_cache = SessionCacheManager(
             app.state.engine,
             max_sessions=2,
-            max_cached_tokens=3000,
+            max_cached_tokens=8192,
             min_prefix_tokens=64,
         )
 
