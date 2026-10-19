@@ -3,6 +3,9 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+from local_llm.conversation.compaction import CompactionConfig
+from local_llm.conversation.manager import ConversationManager
+from local_llm.conversation.service import CompactionService
 from local_llm.inference.context import prepare_context
 from local_llm.serving.api import create_app
 
@@ -18,20 +21,16 @@ class FakeSession:
         self.cached_tokens = []
 
     def stream_prepared(self, prepared):
-        self.last_context_stats = prepared.context_stats
+        self.received_prompt = prepared
 
         yield "Hello"
         yield " from MLX!"
 
-        self.messages = [
-            message.copy()
-            for message in prepared.messages
-        ] + [
-            {
-                "role": "assistant",
-                "content": "Hello from MLX!",
-            }
+        self.messages = [m.copy() for m in prepared.messages] + [
+            {"role": "assistant", "content": "Hello from MLX!"}
         ]
+
+        self.last_context_stats = prepared.context_stats
 
         self.last_stats = {
             "total_prompt_tokens": len(prepared.token_ids),
@@ -82,6 +81,8 @@ class FakeEngine:
         self.config = SimpleNamespace(
             model_id=MODEL_ID,
             system_prompt="You are helpful.",
+            max_context_tokens=8192,
+            max_new_tokens=512,
         )
         self.sessions = []
 
@@ -89,6 +90,18 @@ class FakeEngine:
         session = FakeSession()
         self.sessions.append(session)
         return session
+
+
+class FakeSummarizer:
+    def __init__(self):
+        self.calls = []
+
+    def summarize(self, messages, previous_summary, max_tokens):
+        self.calls.append({
+            "messages": messages,
+            "previous_summary": previous_summary,
+        })
+        return "The user is building an MLX inference engine."
 
 
 def test_health():
@@ -271,3 +284,60 @@ def test_streaming_preserves_request_history():
     ]
 
     assert session.last_context_stats.dropped_turns == 0
+
+
+def test_api_compacts_before_generation():
+    engine = FakeEngine()
+    summarizer = FakeSummarizer()
+
+    service = CompactionService(
+        manager=ConversationManager(),
+        summarizer=summarizer,
+        config=CompactionConfig(
+            trigger_utilization=0.01,
+            recent_turns_to_keep=2,
+            summary_max_tokens=128,
+            min_turns_to_compact=2,
+        ),
+    )
+
+    messages = []
+
+    for i in range(5):
+        messages.extend([
+            {"role": "user", "content": f"Question {i}"},
+            {"role": "assistant", "content": f"Answer {i}"},
+        ])
+
+    messages.append({
+        "role": "user",
+        "content": "What should we do next?",
+    })
+
+    with TestClient(
+        create_app(engine, compaction_service=service)
+    ) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": MODEL_ID,
+                "messages": messages,
+            },
+        )
+
+    assert response.status_code == 200
+    assert len(summarizer.calls) == 1
+
+    # The generation session is created after prompt preparation.
+    generation_session = engine.sessions[-1]
+    prepared = generation_session.received_prompt
+
+    assert "MLX inference engine" in (
+        prepared.messages[0]["content"]
+    )
+
+    # Old turns have been replaced by the summary.
+    assert len(prepared.messages) < len(messages) + 1
+    assert prepared.messages[-1]["content"] == (
+        "What should we do next?"
+    )

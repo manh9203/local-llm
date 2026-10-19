@@ -1,8 +1,10 @@
 import asyncio
 import json
+import logging
 import time
 import uuid
 from contextlib import asynccontextmanager, closing
+from time import perf_counter
 from typing import Literal
 
 import anyio
@@ -12,6 +14,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from local_llm.config import ChatConfig
+from local_llm.conversation.compaction import CompactionConfig
+from local_llm.conversation.manager import ConversationManager
+from local_llm.conversation.service import CompactionService
+from local_llm.conversation.summarizer import MLXSummarizer
 from local_llm.inference.engine import InferenceEngine
 from local_llm.inference.metrics import (
     log_context,
@@ -19,6 +25,8 @@ from local_llm.inference.metrics import (
 )
 from local_llm.serving.logging_config import configure_logging
 from local_llm.serving.session_cache import SessionCacheManager
+
+logger = logging.getLogger("local_llm.conversation")
 
 
 class ChatMessage(BaseModel):
@@ -97,7 +105,10 @@ def completion_chunk(
     }
 
 
-def create_app(engine: InferenceEngine | None = None) -> FastAPI:
+def create_app(
+    engine: InferenceEngine | None = None,
+    compaction_service: CompactionService | None = None,
+) -> FastAPI:
     """Create the API, optionally injecting an engine for tests."""
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -115,9 +126,29 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
             min_prefix_tokens=64,
         )
 
+        app.state.conversation_manager = ConversationManager(
+            max_checkpoints=32,
+        )
+
+        app.state.compaction_service = (
+            compaction_service
+            if compaction_service is not None
+            else CompactionService(
+                manager=app.state.conversation_manager,
+                summarizer=MLXSummarizer(app.state.engine),
+                config=CompactionConfig(
+                    trigger_utilization=0.85,
+                    recent_turns_to_keep=4,
+                    summary_max_tokens=512,
+                    min_turns_to_compact=2,
+                ),
+            )
+        )
+
         yield
 
         app.state.session_cache.clear()
+        app.state.conversation_manager.clear()
 
     app = FastAPI(
         title="Local MLX LLM",
@@ -127,6 +158,50 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
 
     # Serialize access to shared model execution.
     inference_lock = asyncio.Lock()
+
+    def prepare_request(messages: list[dict]):
+        """Compact history if needed, then prepare exact model input.
+
+        Must run in a worker thread while inference_lock is held.
+        """
+        model_engine = app.state.engine
+        service = app.state.compaction_service
+        config = model_engine.config
+
+        preparation_session = model_engine.create_session()
+
+        input_budget = (
+            config.max_context_tokens - config.max_new_tokens
+        )
+
+        started = perf_counter()
+
+        result = service.compact_if_needed(
+            messages=messages,
+            model_id=config.model_id,
+            tokenize_messages=preparation_session.tokenize_messages,
+            input_budget=input_budget,
+        )
+
+        compaction_seconds = perf_counter() - started
+
+        # The existing pure context preparer remains responsible
+        # for validating the final token budget.
+        prepared = preparation_session.prepare_messages(
+            result.messages
+        )
+
+        logger.info(
+            "Compaction: new=%s covered=%d elapsed=%.3fs "
+            "original_tokens=%d effective_tokens=%d",
+            result.compacted,
+            result.covered_count,
+            compaction_seconds,
+            len(preparation_session.tokenize_messages(messages)),
+            len(prepared.token_ids),
+        )
+
+        return prepared
 
     @app.get("/health")
     def health():
@@ -178,48 +253,44 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
 
         cache_manager = app.state.session_cache
 
-        # Create a lightweight session object for tokenization.
-        preparation_session = model_engine.create_session()
-        try:
-            prepared = preparation_session.prepare_messages(messages)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=str(exc),
-            ) from exc
-
         # Create metadata for the completion response.
         completion_id = f"chatcmpl-{uuid.uuid4().hex}"
         created = int(time.time())
         model_id = model_engine.config.model_id
 
         if not request.stream:
-            async with inference_lock:
-                def generate_all():
-                    session = cache_manager.acquire(prepared.token_ids)
-                    try:
-                        with closing(session.stream_prepared(prepared)) as stream:
-                            answer = "".join(stream)
+            def run_completion():
+                # Both compaction and inference run in this thread,
+                # under the API-level inference lock.
+                prepared = prepare_request(messages)
+                session = cache_manager.acquire(prepared.token_ids)
+                try:
+                    with closing(session.stream_prepared(prepared)) as stream:
+                        answer = "".join(stream)
 
-                        stats = session.last_stats
-                        if stats is None:
-                            raise HTTPException(
-                                status_code=500,
-                                detail="Inference did not complete.",
-                            )
+                    stats = session.last_stats
+                    if stats is None:
+                        raise HTTPException(
+                            status_code=500,
+                            detail="Inference did not complete.",
+                        )
 
-                        context_stats = session.last_context_stats
+                    cache_manager.release(session)
+                    return answer, stats, prepared.context_stats
+                except BaseException:
+                    session.clear_cache()
+                    raise
 
-                        cache_manager.release(session)
-
-                        return answer, stats, context_stats
-                    except BaseException:
-                        session.clear_cache()
-                        raise
-
-                answer, stats, context_stats = await anyio.to_thread.run_sync(
-                    generate_all
-                )
+            try:
+                async with inference_lock:
+                    answer, stats, context_stats = (
+                        await anyio.to_thread.run_sync(run_completion)
+                    )
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=str(exc),
+                ) from exc
 
             log_context(context_stats)
             log_inference(stats)
@@ -251,6 +322,11 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
 
         async def events():
             async with inference_lock:
+                prepared = await anyio.to_thread.run_sync(
+                    prepare_request,
+                    messages,
+                )
+
                 session = cache_manager.acquire(prepared.token_ids)
                 stream = session.stream_prepared(prepared)
                 completed = False
