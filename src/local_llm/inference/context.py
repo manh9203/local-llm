@@ -13,6 +13,18 @@ class ContextStats:
     def truncated(self) -> bool:
         return self.dropped_turns > 0
 
+    @property
+    def utilization(self) -> float:
+        return self.effective_tokens / self.input_budget
+
+    @property
+    def removed_tokens(self) -> int:
+        return self.original_tokens - self.effective_tokens
+
+    @property
+    def remaining_tokens(self) -> int:
+        return self.input_budget - self.effective_tokens
+
 
 @dataclass(frozen=True)
 class PreparedPrompt:

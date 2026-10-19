@@ -35,7 +35,14 @@ class FakeSession:
 
         self.last_stats = {
             "total_prompt_tokens": len(prepared.token_ids),
+            "reused_tokens": 0,
+            "processed_prompt_tokens": len(prepared.token_ids),
+            "prompt_tps": 100.0,
             "generation_tokens": 4,
+            "generation_tps": 20.0,
+            "peak_memory_gb": 1.0,
+            "elapsed_seconds": 0.25,
+            "first_token_seconds": 0.05,
             "finish_reason": "stop",
         }
 

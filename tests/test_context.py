@@ -188,3 +188,39 @@ def test_invalid_budget():
             max_context_tokens=512,
             max_new_tokens=512,
         )
+
+
+def test_context_stats_properties():
+    from local_llm.inference.context import ContextStats
+
+    stats = ContextStats(
+        original_tokens=9000,
+        effective_tokens=6000,
+        input_budget=7680,
+        dropped_turns=2,
+    )
+
+    assert stats.truncated
+    assert stats.removed_tokens == 3000
+    assert stats.remaining_tokens == 1680
+    assert stats.utilization == pytest.approx(6000 / 7680)
+
+
+def test_prepared_prompt_never_exceeds_budget():
+    messages = [
+        {"role": "system", "content": "Be helpful"},
+        {"role": "user", "content": "A" * 100},
+        {"role": "assistant", "content": "B" * 100},
+        {"role": "user", "content": "C" * 100},
+        {"role": "assistant", "content": "D" * 100},
+        {"role": "user", "content": "Latest question"},
+    ]
+
+    result = prepare(messages, budget=150)
+    stats = result.context_stats
+
+    assert stats.effective_tokens <= stats.input_budget
+    assert 0 <= stats.utilization <= 1
+    assert stats.remaining_tokens >= 0
+    assert stats.removed_tokens >= 0
+    assert stats.dropped_turns > 0

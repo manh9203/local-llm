@@ -73,6 +73,11 @@ class SessionCacheManager:
         size = len(session.cached_tokens)
 
         if size > self.max_cached_tokens:
+            print(
+                f"[Cache reject] reason=token_budget "
+                f"size={size} limit={self.max_cached_tokens}",
+                flush=True,
+            )
             session.clear_cache()
             return
 
@@ -89,6 +94,11 @@ class SessionCacheManager:
             > self.max_cached_tokens
         ):
             old = self.sessions.pop(0)
+            print(
+                f"[Cache eviction] reason=aggregate_token_budget "
+                f"size={len(old.cached_tokens)}",
+                flush=True,
+            )
             old.clear_cache()
 
     def clear(self) -> None:

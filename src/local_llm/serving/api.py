@@ -13,6 +13,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from local_llm.config import ChatConfig
 from local_llm.inference.engine import InferenceEngine
+from local_llm.inference.metrics import (
+    log_context,
+    log_inference,
+)
+from local_llm.serving.logging_config import configure_logging
 from local_llm.serving.session_cache import SessionCacheManager
 
 
@@ -96,6 +101,8 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
     """Create the API, optionally injecting an engine for tests."""
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        configure_logging()
+
         app.state.engine = (
             engine if engine is not None
             else InferenceEngine(ChatConfig())
@@ -214,16 +221,8 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
                     generate_all
                 )
 
-            if context_stats is not None:
-                print(
-                    f"[Context] "
-                    f"original={context_stats.original_tokens} "
-                    f"effective={context_stats.effective_tokens} "
-                    f"budget={context_stats.input_budget} "
-                    f"dropped_turns={context_stats.dropped_turns} "
-                    f"truncated={context_stats.truncated}",
-                    flush=True,
-                )
+            log_context(context_stats)
+            log_inference(stats)
 
             prompt_tokens = stats["total_prompt_tokens"]
             completion_tokens = stats["generation_tokens"]
@@ -306,17 +305,8 @@ def create_app(engine: InferenceEngine | None = None) -> FastAPI:
                         )
 
                         if completed and session.last_stats is not None:
-                            context_stats = session.last_context_stats
-                            if context_stats is not None:
-                                print(
-                                    f"[Context] "
-                                    f"original={context_stats.original_tokens} "
-                                    f"effective={context_stats.effective_tokens} "
-                                    f"budget={context_stats.input_budget} "
-                                    f"dropped_turns={context_stats.dropped_turns} "
-                                    f"truncated={context_stats.truncated}",
-                                    flush=True,
-                                )
+                            log_context(prepared.context_stats)
+                            log_inference(session.last_stats)
 
                             cache_manager.release(session)
                         else:
