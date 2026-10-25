@@ -7,7 +7,6 @@ from benchmarks.compaction_quality.evaluate import (
 )
 from local_llm.conversation.manager import ConversationManager
 
-
 MODEL = "mlx-community/Qwen3-8B-4bit"
 
 

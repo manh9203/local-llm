@@ -10,7 +10,6 @@ from local_llm.conversation.manager import (
     build_effective_messages,
 )
 
-
 MODEL = "mlx-community/Qwen3-8B-4bit"
 
 

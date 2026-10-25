@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 
-
 Message = dict[str, str]
 
 

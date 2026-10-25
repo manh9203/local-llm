@@ -17,7 +17,6 @@ from local_llm.conversation.manager import (
 from local_llm.conversation.summarizer import MLXSummarizer
 from local_llm.inference.engine import InferenceEngine
 
-
 MODEL_ID = "mlx-community/Qwen3-8B-4bit"
 
 # Retain one completed turn for this small stress test.
