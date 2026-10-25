@@ -1,9 +1,14 @@
+import logging
+from time import perf_counter
 from typing import Protocol
 
 from mlx_lm import stream_generate
 
 from local_llm.conversation.checkpoint import Message
+from local_llm.conversation.metrics import SummaryStats
 from local_llm.inference.engine import InferenceEngine
+
+logger = logging.getLogger("local_llm.conversation.summarizer")
 
 SUMMARY_INSTRUCTIONS = """You compact a conversation into a concise,
 faithful memory for a future assistant.
@@ -76,6 +81,7 @@ def build_summary_request(
 class MLXSummarizer:
     def __init__(self, engine: InferenceEngine):
         self.engine = engine
+        self.last_stats: SummaryStats | None = None
 
     def summarize(
         self,
@@ -83,6 +89,8 @@ class MLXSummarizer:
         previous_summary: str | None,
         max_tokens: int,
     ) -> str:
+        self.last_stats = None
+
         if max_tokens <= 0:
             raise ValueError("max_tokens must be positive")
 
@@ -105,6 +113,8 @@ class MLXSummarizer:
                 "Summarization input exceeds model context budget"
             )
 
+        started = perf_counter()
+        first_token_seconds = None
         chunks = []
         last_response = None
 
@@ -116,18 +126,63 @@ class MLXSummarizer:
             sampler=session.sampler,
             prompt_cache=None,
         ):
+            if first_token_seconds is None:
+                first_token_seconds = perf_counter() - started
+
             chunks.append(response.text)
             last_response = response
+
+        elapsed = perf_counter() - started
 
         if last_response is None:
             raise ValueError("Summarizer generated no tokens")
 
-        if last_response.finish_reason == "length":
-            raise ValueError("Summary reached its output-token limit")
-
         summary = "".join(chunks).strip()
+
+        output_tokens = last_response.generation_tokens
+        finish_reason = last_response.finish_reason
+
+        peak_memory = getattr(
+            last_response,
+            "peak_memory",
+            None,
+        )
+
+        stats = SummaryStats(
+            input_tokens=len(token_ids),
+            output_tokens=output_tokens,
+            first_token_seconds=first_token_seconds,
+            elapsed_seconds=elapsed,
+            decode_tps=last_response.generation_tps,
+            peak_memory_gb=peak_memory,
+            finish_reason=finish_reason,
+        )
+
+        self.last_stats = stats
+
+        logger.info(
+            "Summary: input=%d output=%d "
+            "ttft=%.3fs prefill_tps=%.2f "
+            "decode_tps=%.2f elapsed=%.3fs "
+            "peak_memory_gb=%s finish=%s",
+            stats.input_tokens,
+            stats.output_tokens,
+            stats.first_token_seconds,
+            stats.prefill_tps,
+            stats.decode_tps,
+            stats.elapsed_seconds,
+            (
+                f"{stats.peak_memory_gb:.3f}"
+                if stats.peak_memory_gb is not None
+                else "n/a"
+            ),
+            stats.finish_reason,
+        )
 
         if not summary:
             raise ValueError("Summarizer produced an empty summary")
+
+        if finish_reason == "length":
+            raise ValueError("Summary reached its output-token limit")
 
         return summary
