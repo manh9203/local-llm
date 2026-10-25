@@ -296,8 +296,11 @@ def test_api_compacts_before_generation():
         config=CompactionConfig(
             trigger_utilization=0.01,
             recent_turns_to_keep=2,
-            summary_max_tokens=128,
+            summary_max_tokens=1,
             min_turns_to_compact=2,
+            min_new_tokens_to_compact=0,
+            min_expected_savings_tokens=0,
+            summary_overhead_tokens=0,
         ),
     )
 
@@ -305,8 +308,24 @@ def test_api_compacts_before_generation():
 
     for i in range(5):
         messages.extend([
-            {"role": "user", "content": f"Question {i}"},
-            {"role": "assistant", "content": f"Answer {i}"},
+            {
+                "role": "user",
+                "content": (
+                    f"Question {i}: "
+                    + "I am developing a local LLM inference engine "
+                    "with MLX, FastAPI, KV-cache reuse, and "
+                    "conversation compaction. " * 5
+                ),
+            },
+            {
+                "role": "assistant",
+                "content": (
+                    f"Answer {i}: "
+                    + "We should optimize prefill latency, "
+                    "decoding throughput, memory usage, "
+                    "and prompt-cache retention. " * 5
+                ),
+            },
         ])
 
     messages.append({
@@ -328,16 +347,21 @@ def test_api_compacts_before_generation():
     assert response.status_code == 200
     assert len(summarizer.calls) == 1
 
-    # The generation session is created after prompt preparation.
+    checkpoint = service.manager.find(
+        [{"role": "system", "content": "You are helpful."}] + messages,
+        MODEL_ID,
+    )
+
+    assert checkpoint is not None
+    assert checkpoint.covered_count == 7
+
     generation_session = engine.sessions[-1]
     prepared = generation_session.received_prompt
 
-    assert "MLX inference engine" in (
-        prepared.messages[0]["content"]
-    )
+    assert "MLX inference engine" in prepared.messages[0]["content"]
 
-    # Old turns have been replaced by the summary.
     assert len(prepared.messages) < len(messages) + 1
+
     assert prepared.messages[-1]["content"] == (
         "What should we do next?"
     )

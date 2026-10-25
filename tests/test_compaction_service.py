@@ -59,6 +59,9 @@ def make_service(summarizer, manager=None):
             recent_turns_to_keep=2,
             summary_max_tokens=128,
             min_turns_to_compact=2,
+            min_new_tokens_to_compact=0,
+            min_expected_savings_tokens=0,
+            summary_overhead_tokens=0,
         ),
     )
 
@@ -145,3 +148,27 @@ def test_failed_compaction_does_not_save_checkpoint():
     assert not result.compacted
     assert len(manager) == 0
     assert result.messages == history
+
+
+def test_rejects_compaction_when_summary_is_longer():
+    fake = FakeSummarizer()
+    service = make_service(fake)
+
+    messages = make_history(5)
+
+    # Use a summary deliberately larger than the original history.
+    def long_summary(messages, previous_summary, max_tokens):
+        return "An unnecessarily long summary. " * 200
+
+    fake.summarize = long_summary
+
+    result = service.compact_if_needed(
+        messages,
+        MODEL,
+        tokenize,
+        input_budget=300,
+    )
+
+    assert not result.compacted
+    assert len(service.manager) == 0
+    assert result.messages == messages

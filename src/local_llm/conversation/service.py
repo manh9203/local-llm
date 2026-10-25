@@ -2,7 +2,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from local_llm.conversation.checkpoint import Message
+from local_llm.conversation.checkpoint import Message, create_checkpoint
 from local_llm.conversation.compaction import (
     CompactionConfig,
     plan_compaction,
@@ -63,22 +63,45 @@ class CompactionService:
                 if not summary.strip():
                     raise ValueError("Empty summary")
 
-                new_checkpoint = self.manager.create(
+                candidate_checkpoint = create_checkpoint(
                     messages=messages,
                     covered_count=plan.covered_count,
                     summary=summary,
                     model_id=model_id,
                 )
-                checkpoint = new_checkpoint
 
-                return CompactionResult(
-                    messages=build_effective_messages(
-                        messages, checkpoint, model_id
-                    ),
-                    compacted=True,
-                    covered_count=checkpoint.covered_count,
-                    summary=checkpoint.summary,
+                candidate_messages = build_effective_messages(
+                    messages,
+                    candidate_checkpoint,
+                    model_id,
                 )
+
+                new_token_count = len(tokenize_messages(candidate_messages))
+                actual_savings = plan.current_tokens - new_token_count
+
+                if actual_savings < self.config.min_expected_savings_tokens:
+                    logger.info(
+                        "Compaction rejected: actual_savings=%d minimum=%d",
+                        actual_savings,
+                        self.config.min_expected_savings_tokens,
+                    )
+                else:
+                    self.manager.save(candidate_checkpoint)
+                    checkpoint = candidate_checkpoint
+
+                    logger.info(
+                        "Compaction accepted: saved=%d tokens "
+                        "covered=%d",
+                        actual_savings,
+                        checkpoint.covered_count,
+                    )
+
+                    return CompactionResult(
+                        messages=candidate_messages,
+                        compacted=True,
+                        covered_count=checkpoint.covered_count,
+                        summary=checkpoint.summary,
+                    )
 
             except Exception:
                 logger.exception(
