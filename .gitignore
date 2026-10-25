@@ -18,8 +18,8 @@ venv/
 !.env.example
 
 # Model weights and Hugging Face caches
-models/
-checkpoints/
+/models/
+/checkpoints/
 *.safetensors
 *.gguf
 *.bin

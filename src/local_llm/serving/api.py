@@ -13,7 +13,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from local_llm.config import ChatConfig
 from local_llm.conversation.compaction import CompactionConfig
 from local_llm.conversation.manager import ConversationManager
 from local_llm.conversation.service import CompactionService
@@ -23,6 +22,7 @@ from local_llm.inference.metrics import (
     log_context,
     log_inference,
 )
+from local_llm.models.registry import config_from_env
 from local_llm.serving.logging_config import configure_logging
 from local_llm.serving.session_cache import SessionCacheManager
 
@@ -116,7 +116,7 @@ def create_app(
 
         app.state.engine = (
             engine if engine is not None
-            else InferenceEngine(ChatConfig())
+            else InferenceEngine(config_from_env())
         )
 
         app.state.session_cache = SessionCacheManager(

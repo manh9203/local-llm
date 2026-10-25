@@ -1,12 +1,13 @@
 import os
+from dataclasses import replace
 
 import mlx.core as mx
 import numpy as np
 import pytest
 from mlx_lm.models.cache import make_prompt_cache
 
-from local_llm.config import ChatConfig
 from local_llm.inference.engine import InferenceEngine
+from local_llm.models.registry import config_from_env
 
 RUN_INTEGRATION = os.getenv("RUN_MLX_INTEGRATION") == "1"
 
@@ -24,9 +25,10 @@ def session():
     if not RUN_INTEGRATION:
         pytest.skip("Set RUN_MLX_INTEGRATION=1")
 
-    config = ChatConfig(
-        max_new_tokens=128,
+    config = replace(
+        config_from_env(),
         temperature=0.0,
+        max_new_tokens=128,
     )
 
     engine = InferenceEngine(config)

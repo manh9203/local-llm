@@ -365,3 +365,17 @@ def test_api_compacts_before_generation():
     assert prepared.messages[-1]["content"] == (
         "What should we do next?"
     )
+
+
+def test_models_endpoint_uses_active_model():
+    engine = FakeEngine()
+
+    with TestClient(create_app(engine)) as client:
+        response = client.get("/v1/models")
+
+    assert response.status_code == 200
+
+    data = response.json()["data"]
+
+    assert len(data) == 1
+    assert data[0]["id"] == engine.config.model_id

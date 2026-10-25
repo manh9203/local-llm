@@ -1,19 +1,21 @@
 import os
+from dataclasses import replace
 
 import pytest
 
 from local_llm.config import ChatConfig
 from local_llm.inference.engine import InferenceEngine
+from local_llm.models.registry import config_from_env
 
 
 @pytest.fixture(scope="module")
 def engine():
-    return InferenceEngine(
-        ChatConfig(
-            temperature=0.0,
-            max_new_tokens=64,
-        )
+    config = replace(
+        config_from_env(),
+        temperature=0,
+        max_new_tokens=64,
     )
+    return InferenceEngine(config)
 
 
 @pytest.mark.skipif(
