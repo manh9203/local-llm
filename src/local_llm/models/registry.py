@@ -29,6 +29,12 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         backend="mlx_lm",
         family="qwen3",
     ),
+    "mlx-community/Qwen3.5-9B-4bit": ModelSpec(
+        model_id="mlx-community/Qwen3.5-9B-4bit",
+        backend="mlx_lm",
+        family="qwen3_5",
+        enable_prefix_cache=False,
+    ),
 }
 
 

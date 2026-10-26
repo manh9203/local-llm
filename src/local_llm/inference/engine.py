@@ -14,6 +14,7 @@ from local_llm.inference.context import (
     PreparedPrompt,
     prepare_context,
 )
+from local_llm.models.registry import get_model_spec
 
 
 def common_prefix_length(a: list[int], b: list[int]) -> int:
@@ -34,7 +35,8 @@ class InferenceEngine:
         print(f"Loading {config.model_id}...")
         self.model, self.tokenizer = load(config.model_id)
 
-        if not config.enable_thinking:
+        spec = get_model_spec(self.config.model_id)
+        if spec.family == "qwen3" and not self.config.enable_thinking:
             fix_qwen3_chat_template(self.tokenizer)
 
         print("Model loaded.")
@@ -82,12 +84,23 @@ class ChatSession:
         self.last_context_stats = None
 
     def tokenize_messages(self, messages):
-        return list(self.tokenizer.apply_chat_template(
+        tokens = self.tokenizer.apply_chat_template(
             messages,
             tokenize=True,
             add_generation_prompt=True,
             enable_thinking=self.config.enable_thinking,
-        ))
+        )
+
+        if isinstance(tokens, dict):
+            tokens = tokens["input_ids"]
+
+        if hasattr(tokens, "tolist"):
+            tokens = tokens.tolist()
+
+        if tokens and isinstance(tokens[0], list):
+            tokens = tokens[0]
+
+        return list(tokens)
 
     def prepare_messages(
         self,
@@ -182,7 +195,12 @@ class ChatSession:
         pending = prepared.messages
         token_ids = prepared.token_ids
 
-        input_tokens, reused = self.prepare_cache(token_ids)
+        if self.cache_enabled:
+            input_tokens, reused = self.prepare_cache(token_ids)
+            prompt_cache = self.prompt_cache
+        else:
+            input_tokens, reused = token_ids, 0
+            prompt_cache = None
 
         chunks = []
         generated_tokens = []
@@ -198,9 +216,7 @@ class ChatSession:
                 prompt=input_tokens,
                 max_tokens=self.config.max_new_tokens,
                 sampler=self.sampler,
-                prompt_cache=(
-                    self.prompt_cache if self.cache_enabled else None
-                ),
+                prompt_cache=prompt_cache,
             ):
                 if first_token_seconds is None:
                     first_token_seconds = perf_counter() - started

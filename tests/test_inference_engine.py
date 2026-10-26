@@ -99,3 +99,48 @@ def test_stream_prepared_matches_normal_stream(engine):
         session_b.last_stats["total_prompt_tokens"]
         == len(prepared.token_ids)
     )
+
+
+@pytest.mark.skipif(
+    os.environ.get("RUN_MLX_INTEGRATION") != "1",
+    reason="MLX integration tests are disabled",
+)
+def test_qwen35_uncached_multi_turn():
+    engine = InferenceEngine(
+        ChatConfig(
+            model_id="mlx-community/Qwen3.5-9B-4bit",
+            max_context_tokens=8192,
+            max_new_tokens=64,
+            temperature=0,
+            enable_thinking=False,
+            use_cache=False,
+        )
+    )
+
+    session = engine.create_session()
+
+    first = "".join(session.stream(
+        "My computer has 16 GB of unified memory. "
+        "Reply briefly."
+    ))
+
+    assert first.strip()
+    assert session.last_stats["reused_tokens"] == 0
+    assert session.prompt_cache is None
+
+    second = "".join(session.stream(
+        "How much unified memory does my computer have? "
+        "Answer briefly."
+    ))
+
+    assert "16" in second
+    assert session.last_stats["reused_tokens"] == 0
+    assert session.prompt_cache is None
+
+    assert len(session.messages) == 5
+
+    session.reset()
+
+    assert len(session.messages) == 1
+    assert session.prompt_cache is None
+    assert session.cached_tokens == []
