@@ -1,14 +1,19 @@
+import copy
 from time import perf_counter
 
 from mlx_lm import load, stream_generate
 from mlx_lm.models.cache import (
+    KVCache,
     can_trim_prompt_cache,
     make_prompt_cache,
     trim_prompt_cache,
 )
 from mlx_lm.sample_utils import make_sampler
 
-from local_llm.chat_template import fix_qwen3_chat_template
+from local_llm.chat_template import (
+    fix_qwen3_chat_template,
+    fix_qwen35_chat_template,
+)
 from local_llm.config import ChatConfig
 from local_llm.inference.context import (
     PreparedPrompt,
@@ -36,8 +41,11 @@ class InferenceEngine:
         self.model, self.tokenizer = load(config.model_id)
 
         spec = get_model_spec(self.config.model_id)
-        if spec.family == "qwen3" and not self.config.enable_thinking:
-            fix_qwen3_chat_template(self.tokenizer)
+        if not self.config.enable_thinking:
+            if spec.family == "qwen3":
+                fix_qwen3_chat_template(self.tokenizer)
+            elif spec.family == "qwen3_5":
+                fix_qwen35_chat_template(self.tokenizer)
 
         print("Model loaded.")
 
@@ -62,7 +70,17 @@ class ChatSession:
             top_k=self.config.top_k,
         )
 
-        self.cache_enabled = self.config.use_cache
+        spec = get_model_spec(self.config.model_id)
+        self.cache_enabled = (
+            self.config.use_cache
+            and spec.enable_prefix_cache
+        )
+        self.cache_strategy = (
+            spec.cache_strategy
+            if self.cache_enabled
+            else "none"
+        )
+
         self.last_stats = None
 
         self.reset()
@@ -82,6 +100,23 @@ class ChatSession:
         self.last_generated_tokens = []
         self.last_stats = None
         self.last_context_stats = None
+
+    def clone_cached_session(self):
+        """Create an independent session from a cached state."""
+        if (
+            not self.cache_enabled
+            or self.prompt_cache is None
+            or self.cache_size() != len(self.cached_tokens)
+        ):
+            raise ValueError("Cannot clone invalid cache state")
+
+        clone = self.engine.create_session()
+
+        clone.prompt_cache = copy.deepcopy(self.prompt_cache)
+        clone.cached_tokens = self.cached_tokens.copy()
+        clone.messages = copy.deepcopy(self.messages)
+
+        return clone
 
     def tokenize_messages(self, messages):
         tokens = self.tokenizer.apply_chat_template(
@@ -123,10 +158,20 @@ class ChatSession:
         return prepared.messages, prepared.token_ids
 
     def cache_size(self):
-        if not self.prompt_cache:
+        if self.prompt_cache is None:
             return 0
 
-        sizes = [c.size() for c in self.prompt_cache]
+        if self.cache_strategy == "append_only":
+            sizes = [
+                layer.size()
+                for layer in self.prompt_cache
+                if isinstance(layer, KVCache)
+            ]
+        else:
+            sizes = [
+                layer.size()
+                for layer in self.prompt_cache
+            ]
 
         if not sizes or len(set(sizes)) != 1:
             return -1
@@ -138,15 +183,40 @@ class ChatSession:
             return token_ids, 0
 
         if self.prompt_cache is None:
-            self.prompt_cache = make_prompt_cache(self.model)
-            self.cached_tokens = []
+            self._reset_prompt_cache()
 
+        # The cached token history must match the actual cache position.
+        if self.cache_size() != len(self.cached_tokens):
+            self._reset_prompt_cache()
+
+        if self.cache_strategy == "append_only":
+            return self._prepare_append_only_cache(token_ids)
+
+        return self._prepare_trimmable_cache(token_ids)
+
+    def _reset_prompt_cache(self):
+        self.clear_cache()
+        self.prompt_cache = make_prompt_cache(self.model)
+        self.cached_tokens = []
+
+    def _prepare_append_only_cache(self, token_ids):
+        prefix = len(self.cached_tokens)
+
+        # Hybrid state cannot be trimmed. Reuse only if the
+        # entire cached history is a strict prefix of the new prompt.
         if (
-            not can_trim_prompt_cache(self.prompt_cache)
-            or self.cache_size() != len(self.cached_tokens)
+            prefix >= len(token_ids)
+            or token_ids[:prefix] != self.cached_tokens
         ):
-            self.clear_cache()
-            self.prompt_cache = make_prompt_cache(self.model)
+            self._reset_prompt_cache()
+            return token_ids, 0
+
+        return token_ids[prefix:], prefix
+
+    def _prepare_trimmable_cache(self, token_ids):
+        if not can_trim_prompt_cache(self.prompt_cache):
+            self._reset_prompt_cache()
+            return token_ids, 0
 
         prefix = common_prefix_length(
             self.cached_tokens, token_ids
@@ -156,16 +226,11 @@ class ChatSession:
         prefix = min(prefix, len(token_ids) - 1)
 
         to_trim = len(self.cached_tokens) - prefix
-
-        if to_trim:
-            trimmed = trim_prompt_cache(
-                self.prompt_cache, to_trim
-            )
-
+        if to_trim > 0:
+            trimmed = trim_prompt_cache(self.prompt_cache, to_trim)
             if trimmed != to_trim:
-                self.clear_cache()
-                self.prompt_cache = make_prompt_cache(self.model)
-                prefix = 0
+                self._reset_prompt_cache()
+                return token_ids, 0
 
         self.cached_tokens = token_ids[:prefix]
 
@@ -182,6 +247,13 @@ class ChatSession:
         size = self.cache_size()
 
         if size < 0 or size > len(processed_sequence):
+            self.clear_cache()
+            return
+
+        if (
+            self.cache_strategy == "append_only"
+            and size < len(self.cached_tokens) + len(input_tokens)
+        ):
             self.clear_cache()
             return
 

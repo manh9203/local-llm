@@ -6,6 +6,12 @@ from local_llm.config import ChatConfig
 
 Backend = Literal["mlx_lm"]
 
+CacheStrategy = Literal[
+    "none",
+    "trimmable",
+    "append_only",
+]
+
 
 @dataclass(frozen=True)
 class ModelSpec:
@@ -13,6 +19,7 @@ class ModelSpec:
     backend: Backend
     family: str
     enable_prefix_cache: bool = True
+    cache_strategy: CacheStrategy = "trimmable"
 
 
 DEFAULT_MODEL_ID = "mlx-community/Qwen3-8B-4bit"
@@ -33,7 +40,7 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         model_id="mlx-community/Qwen3.5-9B-4bit",
         backend="mlx_lm",
         family="qwen3_5",
-        enable_prefix_cache=False,
+        cache_strategy="append_only",
     ),
 }
 

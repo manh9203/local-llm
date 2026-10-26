@@ -144,3 +144,51 @@ def test_qwen35_uncached_multi_turn():
     assert len(session.messages) == 1
     assert session.prompt_cache is None
     assert session.cached_tokens == []
+
+
+@pytest.mark.skipif(
+    os.environ.get("RUN_MLX_INTEGRATION") != "1",
+    reason="MLX integration disabled",
+)
+def test_qwen35_append_only_multi_turn():
+    engine = InferenceEngine(
+        ChatConfig(
+            model_id="mlx-community/Qwen3.5-9B-4bit",
+            max_context_tokens=8192,
+            max_new_tokens=64,
+            temperature=0,
+            enable_thinking=False,
+            use_cache=True,
+        )
+    )
+
+    session = engine.create_session()
+
+    assert session.cache_strategy == "append_only"
+
+    answer1 = "".join(session.stream(
+        "My laptop has 16 GB of unified memory. "
+        "Acknowledge in one sentence."
+    ))
+
+    assert answer1.strip()
+    assert session.last_stats["reused_tokens"] == 0
+
+    answer2 = "".join(session.stream(
+        "How much unified memory does my laptop have?"
+    ))
+
+    assert "16" in answer2
+    assert session.last_stats["reused_tokens"] > 0
+
+    answer3 = "".join(session.stream(
+        "What hardware specification did I mention initially?"
+    ))
+
+    assert answer3.strip()
+    assert session.last_stats["reused_tokens"] > 0
+
+    session.reset()
+
+    assert session.prompt_cache is None
+    assert session.cached_tokens == []

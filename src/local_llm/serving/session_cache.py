@@ -15,7 +15,7 @@ class SessionCacheManager:
     def __init__(
         self,
         engine: InferenceEngine,
-        max_sessions: int = 2,
+        max_sessions: int = 3,
         max_cached_tokens: int = 8192,
         min_prefix_tokens: int = 64,
     ):
@@ -31,15 +31,28 @@ class SessionCacheManager:
         self.sessions: list[ChatSession] = []
 
     def acquire(self, token_ids: list[int]) -> ChatSession:
-        """Select the session with the best cached prefix."""
+        """Select the compatible session with the most reusable tokens."""
         best_index = None
         best_prefix = 0
 
         for i, session in enumerate(self.sessions):
+            if not session.cache_enabled:
+                continue
+
+            cached_tokens = session.cached_tokens
             prefix = common_prefix_length(
-                session.cached_tokens,
+                cached_tokens,
                 token_ids,
             )
+
+            if session.cache_strategy == "append_only":
+                if (
+                    prefix != len(cached_tokens)
+                    or len(cached_tokens) >= len(token_ids)
+                ):
+                    continue
+            elif session.cache_strategy != "trimmable":
+                continue
 
             if prefix > best_prefix:
                 best_index = i
@@ -51,7 +64,14 @@ class SessionCacheManager:
         )
 
         if hit:
-            session = self.sessions.pop(best_index)
+            if self.sessions[best_index].cache_strategy == "append_only":
+                original = self.sessions.pop(best_index)
+                # Keep the original checkpoint at the LRU end
+                # and continue from an independent copy.
+                self.sessions.insert(0, original)
+                session = original.clone_cached_session()
+            else:
+                session = self.sessions.pop(best_index)
         else:
             session = self.engine.create_session()
 
