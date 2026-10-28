@@ -1,7 +1,7 @@
 import pytest
 
 from local_llm.chat import ChatConfig
-from local_llm.inference.context import prepare_context
+from local_llm.inference.context import ContextStats, prepare_context
 from local_llm.inference.engine import ChatSession
 
 
@@ -191,8 +191,6 @@ def test_invalid_budget():
 
 
 def test_context_stats_properties():
-    from local_llm.inference.context import ContextStats
-
     stats = ContextStats(
         original_tokens=9000,
         effective_tokens=6000,

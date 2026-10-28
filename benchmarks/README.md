@@ -1,84 +1,94 @@
-# MLX Local LLM Benchmarks
+# Local LLM benchmarks
 
-## Hardware and model
+This suite measures inference performance, conversation compaction, and hybrid
+KV-cache memory use on Apple Silicon. It supports:
 
-- Device: Apple M1
-- Unified memory: 16 GB
-- Engine: MLX-LM
-- Model: mlx-community/Qwen3-8B-4bit
-- Quantization: 4-bit
-- Batch size: 1
+- `mlx-community/Qwen3-8B-4bit`
+- `mlx-community/Qwen3.5-9B-4bit`
 
-## Baseline throughput
+Run commands from the repository root, with one model loaded at a time. Save
+results under `outputs/benchmarks/`, which is ignored by Git. Each run needs a
+fresh output filename; commands refuse to overwrite existing results.
 
-Official MLX-LM benchmark, 128 generated tokens,
-3 trials per configuration.
+## Performance
 
-| Input tokens | Prefill tok/s | Decode tok/s | Peak memory |
-|---:|---:|---:|---:|
-| 128 | 76.28 | 13.52 | 4.89 GB |
-| 512 | 85.93 | 13.00 | 5.12 GB |
-| 2048 | 86.52 | 12.68 | 5.50 GB |
+Run the same two-turn conversation with caching enabled and disabled at several
+prompt lengths:
 
-## Multi-turn KV-cache optimization
+```sh
+uv run python -m benchmarks.performance \
+  --model mlx-community/Qwen3-8B-4bit \
+  --targets 512 2048 6000 7500 --trials 3 \
+  --output outputs/benchmarks/qwen3-performance.json
+```
 
-### Before the chat-template fix
+The runner warms up generation, alternates cache-on/off order across trials, and
+verifies identical prompt and output token IDs in both modes. Truncated prompts,
+unexpected cache behavior, or token differences stop the comparison.
 
-- Qwen3 non-thinking template caused token-prefix divergence.
-- Reused tokens: 36
-- Prefill tokens: 269
-- Time to first token: 3.60 s
+Results include individual samples and median time to first token, prefill and
+decode throughput, cache reuse, and peak MLX memory. Compare continuation timings
+between cache modes to measure the benefit of reuse. Memory measurements cover
+MLX allocations; repeated filler prompts measure scaling with prompt length.
 
-### After the chat-template fix
+## Compaction quality
 
-- Cached tokens match the reconstructed conversation prefix.
-- Reused tokens: 234 / 259 (90.3%)
-- Prefill tokens: 25
-- Time to first token: 0.68 s
-- Decode throughput: 13.1 tok/s
-- Peak MLX memory: 4.85 GB
+Compare answers from full history with answers from a compacted conversation:
 
-Observed TTFT reduction: approximately 81.1%.
+```sh
+uv run python -m benchmarks.quality \
+  --model mlx-community/Qwen3-8B-4bit \
+  --output outputs/benchmarks/qwen3-quality.json
 
-Note: These measurements used different generated conversations.
-They demonstrate successful prefix reuse but are not a
-controlled A/B comparison.
+uv run python -m benchmarks.scoring outputs/benchmarks/qwen3-quality.json
+```
 
-## Controlled KV-cache benchmark
+The suite contains 12 questions across three conversations, each passing through
+three rounds of compaction. Questions cover corrected facts, approved and deferred
+decisions, negation, and unspecified information. For example, they distinguish
+“not booked yet” from “decided not to book.”
 
-Hardware: Apple M1, 16 GB unified memory
+Generation uses an 8192-token context, greedy non-thinking decoding, and up to
+128 answer tokens. Compaction retains one recent completed turn and uses a
+512-token summary limit, adjustable with `--summary-tokens`. Each answer uses a
+fresh session with prefix caching disabled, and prompts must fit without truncation.
+Use `--case technical`, `--case travel`, or `--case project` to select a conversation.
 
-Model: mlx-community/Qwen3-8B-4bit
+Answers must be JSON objects matching the requested fields, types, and values.
+String values ignore case and surrounding whitespace. Field names and JSON types
+must match exactly; a single `json` code fence is accepted. Reports distinguish
+invalid JSON, incorrect fields, type mismatches, and incorrect values. Scores
+therefore include output-format compliance as well as factual retrieval.
 
-Configuration:
-- Greedy decoding (`temperature=0`)
-- Maximum generation: 64 tokens
-- Two-turn conversation
-- 3 trials per configuration
-- Identical generated token IDs verified
+Raw results retain histories, rendered questions, expected answers, generated
+answers, summaries, and timing data. Offline scoring writes a compact
+`*.scores.json` report linked to the raw file by path and SHA-256. It uses the
+expected answers saved with that run and leaves the raw file unchanged. Reports
+count passes, failures, and answers requiring review separately. A confirmed
+regression is a full-history pass followed by a compacted-answer failure.
 
-| Metric | Cache off | Cache on |
-|---|---:|---:|
-| Time to first token | 1.761 s | 0.600 s |
-| Prefill tokens | 129 | 25 |
-| Reused tokens | 0 | 104 |
-| Decode throughput | 12.71 tok/s | 13.74 tok/s |
+This small suite checks conversation retention. Review summaries directly for
+unsupported claims that the questions may not cover.
 
-### Results
+## Hybrid-cache clone memory
 
-- Time to first token reduced by **65.9%**.
-- Prefill workload reduced by **80.6%**.
-- Time to first token improved by approximately **2.94x**.
-- Cached and uncached inference produced identical generated
-  token IDs for the tested conversation.
+Measure the time and memory needed to create two forks of an append-only cache,
+advance each fork independently, and release their cached state:
 
-### Interpretation
+```sh
+uv run python -m benchmarks.cache_clone_memory \
+  --model mlx-community/Qwen3.5-9B-4bit \
+  --output outputs/benchmarks/qwen35-clone-memory.json
+```
 
-KV-cache reuse significantly reduces repeated prompt processing
-during multi-turn conversations.
+The diagnostic records MLX memory at each stage and verifies that advancing a
+fork preserves the original checkpoint. It requires an append-only cache model.
 
-The primary improvement is in prefill latency, not necessarily
-steady-state decoding throughput.
+## Evaluator tests
 
-These results are limited to the tested prompt lengths and
-three trials. Longer conversations require additional evaluation.
+```sh
+uv run pytest tests/test_benchmarks.py -q
+```
+
+These tests check scoring decisions, JSON handling, and result preservation.
+They run without loading a model or accessing Metal.

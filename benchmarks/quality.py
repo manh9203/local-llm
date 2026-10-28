@@ -1,13 +1,14 @@
 import argparse
 import json
-import re
 from dataclasses import asdict
 from pathlib import Path
+from platform import python_version
 from time import perf_counter
 
-from benchmarks.compaction_quality.downstream_cases import (
-    ALL_CASES,
-    Probe,
+from benchmarks.quality_cases import ALL_CASES
+from benchmarks.scoring import (
+    SCORING_VERSION,
+    score_run,
 )
 from local_llm.config import ChatConfig
 from local_llm.conversation.manager import (
@@ -17,27 +18,8 @@ from local_llm.conversation.manager import (
 from local_llm.conversation.summarizer import MLXSummarizer
 from local_llm.inference.engine import InferenceEngine
 
-MODEL_ID = "mlx-community/Qwen3-8B-4bit"
-
 # Retain one completed turn for this small stress test.
 RECENT_TURNS_TO_KEEP = 1
-
-
-def score_answer(answer: str, probe: Probe) -> dict:
-    missing = []
-
-    for alternatives in probe.required:
-        matched = any(
-            re.search(pattern, answer, re.IGNORECASE)
-            for pattern in alternatives
-        )
-        if not matched:
-            missing.append(list(alternatives))
-
-    return {
-        "passed": not missing,
-        "missing_patterns": missing,
-    }
 
 
 def generate_answer(engine, messages: list[dict]) -> dict:
@@ -55,7 +37,9 @@ def generate_answer(engine, messages: list[dict]) -> dict:
     answer = "".join(session.stream_prepared(prepared))
     elapsed = perf_counter() - started
 
-    stats = session.last_stats or {}
+    stats = session.last_stats
+    if stats is None:
+        raise RuntimeError("Generation returned no statistics")
 
     session.clear_cache()
 
@@ -64,10 +48,13 @@ def generate_answer(engine, messages: list[dict]) -> dict:
         "prompt_tokens": len(prepared.token_ids),
         "elapsed_seconds": elapsed,
         "ttft_seconds": stats.get("first_token_seconds"),
+        "generated_tokens": stats["generation_tokens"],
+        "finish_reason": stats["finish_reason"],
+        "peak_memory_gb": stats["peak_memory_gb"],
     }
 
 
-def run_case(engine, case, max_summary_tokens, max_probes):
+def run_case(engine, case, max_summary_tokens, max_probes, model_id):
     manager = ConversationManager()
     summarizer = MLXSummarizer(engine)
 
@@ -115,10 +102,10 @@ def run_case(engine, case, max_summary_tokens, max_probes):
             messages=history,
             covered_count=covered_count,
             summary=summary,
-            model_id=MODEL_ID,
+            model_id=model_id,
         )
 
-        assert checkpoint.matches(history, MODEL_ID)
+        assert checkpoint.matches(history, model_id)
 
         rounds.append({
             "round": round_number,
@@ -150,49 +137,39 @@ def run_case(engine, case, max_summary_tokens, max_probes):
             "role": "user",
             "content": (
                 probe.question
-                + "\nAnswer briefly based only on the "
-                  "conversation. If something was not "
-                  "specified, say so."
+                + "\nAnswer based only on the conversation. Return only a JSON "
+                  "object with exactly the fields and types/choices below. "
+                  "Use null or unknown for unspecified information when allowed. "
+                  "Do not include explanations.\n"
+                + json.dumps(probe.answer_format)
             ),
         }
 
         full_messages = history + [question]
 
         # Checkpoint must match the original client history.
-        assert manager.find(full_messages, MODEL_ID) == checkpoint
+        assert manager.find(full_messages, model_id) == checkpoint
 
         compacted_messages = build_effective_messages(
             full_messages,
             checkpoint,
-            MODEL_ID,
+            model_id,
         )
 
         full = generate_answer(engine, full_messages)
         compacted = generate_answer(engine, compacted_messages)
 
-        full_score = score_answer(full["answer"], probe)
-        compacted_score = score_answer(
-            compacted["answer"], probe
-        )
-
         evaluations.append({
             "probe": probe.name,
-            "question": probe.question,
-            "reference": probe.reference,
-            "full": {
-                **full,
-                **full_score,
-            },
-            "compacted": {
-                **compacted,
-                **compacted_score,
-            },
+            "question": question["content"],
+            "expected": probe.expected,
+            "answer_format": probe.answer_format,
+            "full": full,
+            "compacted": compacted,
         })
 
         print(
             f"  {probe.name}: "
-            f"full={full_score['passed']} "
-            f"compacted={compacted_score['passed']} "
             f"tokens={full['prompt_tokens']}"
             f"->{compacted['prompt_tokens']}",
             flush=True,
@@ -200,6 +177,7 @@ def run_case(engine, case, max_summary_tokens, max_probes):
 
     return {
         "case": case.name,
+        "history": history,
         "rounds": rounds,
         "evaluations": evaluations,
     }
@@ -208,6 +186,11 @@ def run_case(engine, case, max_summary_tokens, max_probes):
 def main():
     parser = argparse.ArgumentParser()
 
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="mlx-community/Qwen3-8B-4bit",
+    )
     parser.add_argument(
         "--case",
         choices=["all"] + [c.name for c in ALL_CASES],
@@ -226,15 +209,17 @@ def main():
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path(
-            "benchmarks/compaction_quality/downstream_results.json"
-        ),
+        required=True,
     )
 
     args = parser.parse_args()
 
     if args.max_probes is not None and args.max_probes <= 0:
         parser.error("--max-probes must be positive")
+    if not 0 < args.summary_tokens < 8192:
+        parser.error("--summary-tokens must be between 1 and 8191")
+    if args.output.exists():
+        parser.error(f"Output already exists: {args.output}")
 
     selected_cases = [
         case for case in ALL_CASES
@@ -243,7 +228,7 @@ def main():
 
     engine = InferenceEngine(
         ChatConfig(
-            model_id=MODEL_ID,
+            model_id=args.model,
             max_context_tokens=8192,
             max_new_tokens=128,
             temperature=0,
@@ -262,64 +247,33 @@ def main():
             case,
             args.summary_tokens,
             args.max_probes,
+            args.model
         )
 
         results.append(result)
 
-    all_evaluations = [
-        item
-        for result in results
-        for item in result["evaluations"]
-    ]
-
-    full_correct = sum(
-        item["full"]["passed"]
-        for item in all_evaluations
-    )
-
-    compacted_correct = sum(
-        item["compacted"]["passed"]
-        for item in all_evaluations
-    )
-
-    regressions = sum(
-        item["full"]["passed"]
-        and not item["compacted"]["passed"]
-        for item in all_evaluations
-    )
-
     report = {
-        "model": MODEL_ID,
+        "protocol": SCORING_VERSION,
+        "model": args.model,
+        "config": asdict(engine.config),
+        "python_version": python_version(),
         "summary_tokens": args.summary_tokens,
-        "total_probes": len(all_evaluations),
-        "full_correct": full_correct,
-        "compacted_correct": compacted_correct,
-        "regressions": regressions,
+        "recent_turns_to_keep": RECENT_TURNS_TO_KEEP,
         "results": results,
     }
+    scores = score_run(report)
 
     args.output.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    args.output.write_text(
-        json.dumps(
-            report,
-            indent=2,
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
+    with args.output.open("x", encoding="utf-8") as output:
+        output.write(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
 
-    print("\n=== Summary ===")
-    print(
-        f"Full history: {full_correct}/{len(all_evaluations)}"
-    )
-    print(
-        f"Compacted: {compacted_correct}/{len(all_evaluations)}"
-    )
-    print(f"Regressions: {regressions}")
+    print(f"\nFull history: {scores['full']}")
+    print(f"Compacted: {scores['compacted']}")
+    print(f"Confirmed regressions: {scores['confirmed_regressions']}")
     print(f"Results: {args.output}")
 
 

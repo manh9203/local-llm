@@ -14,21 +14,19 @@ def turn(user: str, assistant: str) -> tuple[Message, ...]:
 class Probe:
     name: str
     question: str
-    reference: str
-
-    # Each group represents one required fact.
-    # Alternative regex patterns within a group are OR'd.
-    required: tuple[tuple[str, ...], ...]
+    expected: dict[str, str | int | bool | None]
+    # Describes valid outputs without identifying the correct selections.
+    answer_format: dict[str, str]
 
 
 @dataclass(frozen=True)
-class DownstreamCase:
+class QualityCase:
     name: str
     segments: tuple[tuple[Message, ...], ...]
     probes: tuple[Probe, ...]
 
 
-TECHNICAL = DownstreamCase(
+TECHNICAL = QualityCase(
     name="technical",
     segments=(
         turn(
@@ -70,14 +68,17 @@ TECHNICAL = DownstreamCase(
                 "What are the current context limit and "
                 "reserved generation budget?"
             ),
-            reference="8192 context tokens; 512 generation tokens.",
-            required=((r"\b8,?192\b",), (r"\b512\b",)),
+            expected={"context_tokens": 8192, "generation_tokens": 512},
+            answer_format={"context_tokens": "integer", "generation_tokens": "integer"},
         ),
         Probe(
             name="checkpoint_design",
             question="How are compaction checkpoints identified?",
-            reference="SHA-256 fingerprints of message prefixes.",
-            required=((r"sha[\s-]?256",),),
+            expected={"algorithm": "sha256", "input": "message_prefix"},
+            answer_format={
+                "algorithm": "sha256 | sha1 | md5 | unknown",
+                "input": "message_prefix | conversation_id | unknown",
+            },
         ),
         Probe(
             name="recent_turns",
@@ -85,14 +86,14 @@ TECHNICAL = DownstreamCase(
                 "How many recent completed turns "
                 "are preserved during compaction?"
             ),
-            reference="Four completed turns.",
-            required=((r"\b4\b", r"\bfour\b"),),
+            expected={"completed_turns": 4},
+            answer_format={"completed_turns": "integer"},
         ),
     ),
 )
 
 
-TRAVEL = DownstreamCase(
+TRAVEL = QualityCase(
     name="travel",
     segments=(
         turn(
@@ -128,34 +129,38 @@ TRAVEL = DownstreamCase(
         Probe(
             name="destination",
             question="What is the current trip destination?",
-            reference="Ottawa.",
-            required=((r"\bottawa\b",),),
+            expected={"destination": "ottawa"},
+            answer_format={"destination": "city name or unknown"},
         ),
         Probe(
             name="transport_budget",
             question="What transport do we prefer and what's the current budget?",
-            reference="Train; CAD 500.",
-            required=(
-                (r"\btrain\b", r"\brail\b"),
-                (r"\b500\b",),
-            ),
+            expected={"transport": "train", "budget_cad": 500},
+            answer_format={"transport": "train | plane | car | unknown", "budget_cad": "integer"},
         ),
         Probe(
             name="museum_booking",
             question="Have we booked museum tickets?",
-            reference="No, museum tickets have not been booked.",
-            required=((
-                r"\bnot\s+(?:yet\s+)?booked\b",
-                r"\bhaven't booked\b",
-                r"\bno\s+(?:museum\s+)?tickets?\s+(?:have\s+been\s+)?booked\b",
-                r"\bnot\s+confirmed\b",
-            ),),
+            expected={"booked": False},
+            answer_format={"booked": "boolean or null if unspecified"},
+        ),
+        Probe(
+            name="museum_decision",
+            question="Have we decided against booking museum tickets, or is that undecided?",
+            expected={"decision": "undecided"},
+            answer_format={"decision": "book | do_not_book | undecided"},
+        ),
+        Probe(
+            name="hotel_name",
+            question="What is the name of our booked hotel?",
+            expected={"hotel_name": None},
+            answer_format={"hotel_name": "string or null if unspecified"},
         ),
     ),
 )
 
 
-PROJECT = DownstreamCase(
+PROJECT = QualityCase(
     name="project",
     segments=(
         turn(
@@ -192,8 +197,8 @@ PROJECT = DownstreamCase(
         Probe(
             name="demo_deadline",
             question="What day is the demo currently scheduled for?",
-            reference="Wednesday.",
-            required=((r"\bwednesday\b",),),
+            expected={"day": "wednesday"},
+            answer_format={"day": "weekday name or unknown"},
         ),
         Probe(
             name="verification",
@@ -201,24 +206,23 @@ PROJECT = DownstreamCase(
                 "Which verification method was approved, "
                 "and which was deferred?"
             ),
-            reference=(
-                "University-email verification approved; "
-                "government-ID verification deferred."
-            ),
-            required=(
-                (r"\b(?:university|student)\s*[- ]?email\b",),
-                (r"\bgovernment\s*[- ]?id\b",),
-                (r"\bdefer", r"\bpostpon", r"\blater\b"),
-            ),
+            expected={"approved": "university_email", "deferred": "government_id"},
+            answer_format={
+                "approved": "university_email | government_id | unknown",
+                "deferred": "university_email | government_id | unknown",
+            },
         ),
         Probe(
             name="next_priority",
             question="What is the immediate next priority?",
-            reference="Testing the verification flow.",
-            required=((
-                r"\btest(?:ing)?\b.{0,70}\bverif",
-                r"\bverif\w*\b.{0,70}\btest(?:ing)?\b",
-            ),),
+            expected={"priority": "verification_testing"},
+            answer_format={"priority": "verification_testing | reviews | listing_filters | unknown"},
+        ),
+        Probe(
+            name="mobile_scope",
+            question="Is a mobile app in the approved project scope?",
+            expected={"in_scope": False},
+            answer_format={"in_scope": "boolean or null if unspecified"},
         ),
     ),
 )
