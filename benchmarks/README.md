@@ -3,8 +3,8 @@
 Benchmarks for assistant quality, conversation compaction, inference performance,
 and hybrid-cache memory on Apple Silicon. Supported models:
 
-- `mlx-community/Qwen3-8B-4bit`
-- `mlx-community/Qwen3.5-9B-4bit`
+- `mlx-community/Qwen3.5-9B-4bit` (default)
+- `mlx-community/Qwen3-8B-4bit` (alternative)
 
 ## Baseline results
 

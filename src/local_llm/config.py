@@ -1,9 +1,11 @@
 from dataclasses import dataclass
 
+DEFAULT_MODEL_ID = "mlx-community/Qwen3.5-9B-4bit"
+
 
 @dataclass(frozen=True)
 class ChatConfig:
-    model_id: str = "mlx-community/Qwen3-8B-4bit"
+    model_id: str = DEFAULT_MODEL_ID
     system_prompt: str = "You are a helpful, concise AI assistant."
     max_context_tokens: int = 8192
     max_new_tokens: int = 512

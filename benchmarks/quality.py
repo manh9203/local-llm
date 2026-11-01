@@ -13,7 +13,7 @@ from time import perf_counter
 
 from benchmarks.quality_cases import case_manifest, case_set_hash, select_cases
 from benchmarks.scoring import PROTOCOL_VERSION, SCORING_VERSION, score_run
-from local_llm.config import ChatConfig
+from local_llm.config import DEFAULT_MODEL_ID, ChatConfig
 from local_llm.conversation.manager import ConversationManager, build_effective_messages
 from local_llm.models.registry import get_model_spec
 
@@ -262,7 +262,7 @@ def main(engine_factory, summarizer_factory):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=("compaction",
                         "capability"), default="compaction")
-    parser.add_argument("--model", default="mlx-community/Qwen3-8B-4bit")
+    parser.add_argument("--model", default=DEFAULT_MODEL_ID)
     parser.add_argument("--case", default="all")
     parser.add_argument("--category", default="all")
     parser.add_argument("--max-probes", type=int)

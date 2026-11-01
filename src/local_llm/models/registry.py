@@ -2,7 +2,7 @@ import os
 from dataclasses import dataclass, replace
 from typing import Literal
 
-from local_llm.config import ChatConfig
+from local_llm.config import DEFAULT_MODEL_ID, ChatConfig
 
 Backend = Literal["mlx_lm"]
 
@@ -20,9 +20,6 @@ class ModelSpec:
     family: str
     enable_prefix_cache: bool = True
     cache_strategy: CacheStrategy = "trimmable"
-
-
-DEFAULT_MODEL_ID = "mlx-community/Qwen3-8B-4bit"
 
 
 MODEL_REGISTRY: dict[str, ModelSpec] = {

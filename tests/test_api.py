@@ -1,15 +1,17 @@
 import json
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
+from local_llm.config import DEFAULT_MODEL_ID
 from local_llm.conversation.compaction import CompactionConfig
 from local_llm.conversation.manager import ConversationManager
 from local_llm.conversation.service import CompactionService
 from local_llm.inference.context import prepare_context
 from local_llm.serving.api import create_app
 
-MODEL_ID = "mlx-community/Qwen3-8B-4bit"
+MODEL_ID = DEFAULT_MODEL_ID
 
 
 class FakeSession:
@@ -379,3 +381,25 @@ def test_models_endpoint_uses_active_model():
 
     assert len(data) == 1
     assert data[0]["id"] == engine.config.model_id
+
+
+@pytest.mark.parametrize("model_id", [None, "mlx-community/Qwen3-8B-4bit"])
+def test_startup_selects_and_advertises_model(monkeypatch, model_id):
+    if model_id is None:
+        monkeypatch.delenv("LOCAL_LLM_MODEL", raising=False)
+    else:
+        monkeypatch.setenv("LOCAL_LLM_MODEL", model_id)
+    loaded = []
+
+    def load_engine(config):
+        loaded.append(config.model_id)
+        engine = FakeEngine()
+        engine.config = config
+        return engine
+
+    monkeypatch.setattr("local_llm.serving.api.InferenceEngine", load_engine)
+    expected = model_id or "mlx-community/Qwen3.5-9B-4bit"
+    with TestClient(create_app()) as client:
+        assert loaded == [expected]
+        assert client.get("/health").json()["model"] == expected
+        assert client.get("/v1/models").json()["data"][0]["id"] == expected

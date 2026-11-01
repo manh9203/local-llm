@@ -4,7 +4,7 @@ from dataclasses import replace
 import mlx.core as mx
 import numpy as np
 import pytest
-from mlx_lm.models.cache import make_prompt_cache
+from mlx_lm.models.cache import KVCache, make_prompt_cache
 
 from local_llm.inference.engine import InferenceEngine
 from local_llm.models.registry import config_from_env
@@ -101,7 +101,10 @@ def test_fixed_token_logits(session):
 
     mx.eval(prefix_logits, [c.state for c in cached])
 
-    assert all(c.size() == len(prefix) for c in cached)
+    # Hybrid recurrent layers have no token-length position.
+    attention_caches = [c for c in cached if isinstance(c, KVCache)]
+    assert attention_caches
+    assert all(c.size() == len(prefix) for c in attention_caches)
 
     suffix_logits = model(
         mx.array(suffix)[None],
@@ -110,7 +113,7 @@ def test_fixed_token_logits(session):
 
     mx.eval(suffix_logits, [c.state for c in cached])
 
-    assert all(c.size() == len(prompt) for c in cached)
+    assert all(c.size() == len(prompt) for c in attention_caches)
 
     # Compare next-token predictions at the final position.
     a = np.array(
