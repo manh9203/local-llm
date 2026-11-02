@@ -46,9 +46,7 @@ def get_model_spec(model_id: str) -> ModelSpec:
     try:
         return MODEL_REGISTRY[model_id]
     except KeyError:
-        raise ValueError(
-            f"Unsupported model: {model_id}"
-        ) from None
+        raise ValueError(f"Unsupported model: {model_id}") from None
 
 
 def config_from_env() -> ChatConfig:
@@ -64,8 +62,5 @@ def config_from_env() -> ChatConfig:
     return replace(
         config,
         model_id=spec.model_id,
-        use_cache=(
-            config.use_cache
-            and spec.enable_prefix_cache
-        ),
+        use_cache=(config.use_cache and spec.enable_prefix_cache),
     )

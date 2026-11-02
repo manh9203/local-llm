@@ -85,9 +85,7 @@ def plan_compaction(
 
     # Cover system + all eligible complete turns.
     covered_count = offset + eligible_turns * 2
-    previous_covered = (
-        checkpoint.covered_count if checkpoint else offset
-    )
+    previous_covered = checkpoint.covered_count if checkpoint else offset
 
     new_message_count = covered_count - previous_covered
     if new_message_count <= 0:
@@ -98,10 +96,7 @@ def plan_compaction(
         return None
 
     new_segment = [
-        message.copy()
-        for message in messages[
-            previous_covered:covered_count
-        ]
+        message.copy() for message in messages[previous_covered:covered_count]
     ]
 
     new_segment_tokens = len(tokenize_messages(new_segment))
@@ -111,10 +106,9 @@ def plan_compaction(
     # Estimate savings by measuring what removing the
     # newly covered segment would remove from the
     # effective prompt, then reserve space for a summary.
-    remaining = (
-        [message.copy() for message in messages[:offset]]
-        + [message.copy() for message in messages[covered_count:]]
-    )
+    remaining = [message.copy() for message in messages[:offset]] + [
+        message.copy() for message in messages[covered_count:]
+    ]
 
     if checkpoint is not None:
         existing_prefix = build_effective_messages(
@@ -128,8 +122,7 @@ def plan_compaction(
     removable_tokens = current_tokens - without_new_segment_tokens
 
     estimated_added_summary_tokens = (
-        config.summary_max_tokens
-        + config.summary_overhead_tokens
+        config.summary_max_tokens + config.summary_overhead_tokens
     )
 
     # Conservative assumption: a new summary might
@@ -141,9 +134,7 @@ def plan_compaction(
     return CompactionPlan(
         covered_count=covered_count,
         messages_to_summarize=new_segment,
-        previous_summary=(
-            checkpoint.summary if checkpoint else None
-        ),
+        previous_summary=(checkpoint.summary if checkpoint else None),
         current_tokens=current_tokens,
         new_segment_tokens=new_segment_tokens,
         expected_savings_tokens=expected_savings,

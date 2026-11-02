@@ -42,9 +42,7 @@ def test_sessions_share_model_but_not_state():
     assert session_a.messages == session_b.messages
 
     # Run inference only in session A.
-    answer = "".join(
-        session_a.stream("What is MLX?")
-    )
+    answer = "".join(session_a.stream("What is MLX?"))
 
     assert answer
     assert len(session_a.messages) == 3
@@ -76,16 +74,18 @@ def test_stream_prepared_matches_normal_stream(engine):
     session_a = engine.create_session()
     session_b = engine.create_session()
 
-    prepared = session_b.prepare_messages([
-        {
-            "role": "system",
-            "content": engine.config.system_prompt,
-        },
-        {
-            "role": "user",
-            "content": prompt,
-        },
-    ])
+    prepared = session_b.prepare_messages(
+        [
+            {
+                "role": "system",
+                "content": engine.config.system_prompt,
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ]
+    )
 
     answer_a = "".join(session_a.stream(prompt))
     answer_b = "".join(session_b.stream_prepared(prepared))
@@ -95,10 +95,7 @@ def test_stream_prepared_matches_normal_stream(engine):
     assert session_a.last_stats is not None
     assert session_b.last_stats is not None
 
-    assert (
-        session_b.last_stats["total_prompt_tokens"]
-        == len(prepared.token_ids)
-    )
+    assert session_b.last_stats["total_prompt_tokens"] == len(prepared.token_ids)
 
 
 @pytest.mark.skipif(
@@ -119,19 +116,17 @@ def test_qwen35_uncached_multi_turn():
 
     session = engine.create_session()
 
-    first = "".join(session.stream(
-        "My computer has 16 GB of unified memory. "
-        "Reply briefly."
-    ))
+    first = "".join(
+        session.stream("My computer has 16 GB of unified memory. Reply briefly.")
+    )
 
     assert first.strip()
     assert session.last_stats["reused_tokens"] == 0
     assert session.prompt_cache is None
 
-    second = "".join(session.stream(
-        "How much unified memory does my computer have? "
-        "Answer briefly."
-    ))
+    second = "".join(
+        session.stream("How much unified memory does my computer have? Answer briefly.")
+    )
 
     assert "16" in second
     assert session.last_stats["reused_tokens"] == 0
@@ -166,24 +161,23 @@ def test_qwen35_append_only_multi_turn():
 
     assert session.cache_strategy == "append_only"
 
-    answer1 = "".join(session.stream(
-        "My laptop has 16 GB of unified memory. "
-        "Acknowledge in one sentence."
-    ))
+    answer1 = "".join(
+        session.stream(
+            "My laptop has 16 GB of unified memory. Acknowledge in one sentence."
+        )
+    )
 
     assert answer1.strip()
     assert session.last_stats["reused_tokens"] == 0
 
-    answer2 = "".join(session.stream(
-        "How much unified memory does my laptop have?"
-    ))
+    answer2 = "".join(session.stream("How much unified memory does my laptop have?"))
 
     assert "16" in answer2
     assert session.last_stats["reused_tokens"] > 0
 
-    answer3 = "".join(session.stream(
-        "What hardware specification did I mention initially?"
-    ))
+    answer3 = "".join(
+        session.stream("What hardware specification did I mention initially?")
+    )
 
     assert answer3.strip()
     assert session.last_stats["reused_tokens"] > 0

@@ -21,7 +21,7 @@ PROMPTS = [
 
 
 @pytest.fixture(scope="module")
-def session():
+def engine():
     if not RUN_INTEGRATION:
         pytest.skip("Set RUN_MLX_INTEGRATION=1")
 
@@ -32,7 +32,14 @@ def session():
     )
 
     engine = InferenceEngine(config)
-    return engine.create_session()
+    return engine
+
+
+@pytest.fixture
+def session(engine):
+    session = engine.create_session()
+    yield session
+    session.reset()
 
 
 def run_conversation(session, prompts, use_cache):
@@ -56,19 +63,21 @@ def run_conversation(session, prompts, use_cache):
 
 def test_fixed_token_logits(session):
     """Compare full-prefill and prefix-cached logits."""
-    prompt = session.tokenize_messages([
-        {
-            "role": "system",
-            "content": "You are a helpful assistant.",
-        },
-        {
-            "role": "user",
-            "content": (
-                "Explain the relationship between "
-                "queries, keys, and values in attention."
-            ),
-        },
-    ])
+    prompt = session.tokenize_messages(
+        [
+            {
+                "role": "system",
+                "content": "You are a helpful assistant.",
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Explain the relationship between "
+                    "queries, keys, and values in attention."
+                ),
+            },
+        ]
+    )
 
     # Split the SAME token sequence into two parts.
     split = len(prompt) // 2
@@ -116,13 +125,9 @@ def test_fixed_token_logits(session):
     assert all(c.size() == len(prompt) for c in attention_caches)
 
     # Compare next-token predictions at the final position.
-    a = np.array(
-        full_logits[0, -1, :].astype(mx.float32)
-    )
+    a = np.array(full_logits[0, -1, :].astype(mx.float32))
 
-    b = np.array(
-        suffix_logits[0, -1, :].astype(mx.float32)
-    )
+    b = np.array(suffix_logits[0, -1, :].astype(mx.float32))
 
     assert np.isfinite(a).all()
     assert np.isfinite(b).all()
@@ -163,8 +168,7 @@ def test_five_turn_cache_invariants(session):
 
         assert (
             s["total_prompt_tokens"]
-            == s["reused_tokens"]
-            + s["processed_prompt_tokens"]
+            == s["reused_tokens"] + s["processed_prompt_tokens"]
         )
 
         if turn > 0:
@@ -258,9 +262,7 @@ def test_stream_cancellation_clears_cache(session):
     session.reset()
     session.cache_enabled = True
 
-    stream = session.stream(
-        "Explain transformer attention in detail."
-    )
+    stream = session.stream("Explain transformer attention in detail.")
 
     next(stream)
     stream.close()

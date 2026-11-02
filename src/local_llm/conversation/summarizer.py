@@ -57,18 +57,12 @@ def build_summary_request(
     parts = []
 
     if previous_summary:
-        parts.append(
-            "PREVIOUS SUMMARY:\n"
-            + previous_summary
-        )
+        parts.append("PREVIOUS SUMMARY:\n" + previous_summary)
 
     parts.append("NEW CONVERSATION SEGMENT:")
 
     for message in messages:
-        parts.append(
-            f"\n[{message['role'].upper()}]\n"
-            f"{message['content']}"
-        )
+        parts.append(f"\n[{message['role'].upper()}]\n{message['content']}")
 
     parts.append(
         "\nProduce an updated summary that incorporates "
@@ -114,13 +108,8 @@ class MLXSummarizer:
 
         token_ids = session.tokenize_messages(request)
 
-        if (
-            len(token_ids) + max_tokens
-            > self.engine.config.max_context_tokens
-        ):
-            raise ValueError(
-                "Summarization input exceeds model context budget"
-            )
+        if len(token_ids) + max_tokens > self.engine.config.max_context_tokens:
+            raise ValueError("Summarization input exceeds model context budget")
 
         started = perf_counter()
         first_token_seconds = None

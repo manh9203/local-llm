@@ -71,15 +71,8 @@ class ChatSession:
         )
 
         spec = get_model_spec(self.config.model_id)
-        self.cache_enabled = (
-            self.config.use_cache
-            and spec.enable_prefix_cache
-        )
-        self.cache_strategy = (
-            spec.cache_strategy
-            if self.cache_enabled
-            else "none"
-        )
+        self.cache_enabled = self.config.use_cache and spec.enable_prefix_cache
+        self.cache_strategy = spec.cache_strategy if self.cache_enabled else "none"
 
         self.last_stats = None
 
@@ -150,9 +143,7 @@ class ChatSession:
 
     def prepare_prompt(self, user_input: str):
         prepared = self.prepare_messages(
-            self.messages + [
-                {"role": "user", "content": user_input}
-            ]
+            self.messages + [{"role": "user", "content": user_input}]
         )
 
         return prepared.messages, prepared.token_ids
@@ -168,10 +159,7 @@ class ChatSession:
                 if isinstance(layer, KVCache)
             ]
         else:
-            sizes = [
-                layer.size()
-                for layer in self.prompt_cache
-            ]
+            sizes = [layer.size() for layer in self.prompt_cache]
 
         if not sizes or len(set(sizes)) != 1:
             return -1
@@ -204,10 +192,7 @@ class ChatSession:
 
         # Hybrid state cannot be trimmed. Reuse only if the
         # entire cached history is a strict prefix of the new prompt.
-        if (
-            prefix >= len(token_ids)
-            or token_ids[:prefix] != self.cached_tokens
-        ):
+        if prefix >= len(token_ids) or token_ids[:prefix] != self.cached_tokens:
             self._reset_prompt_cache()
             return token_ids, 0
 
@@ -218,9 +203,7 @@ class ChatSession:
             self._reset_prompt_cache()
             return token_ids, 0
 
-        prefix = common_prefix_length(
-            self.cached_tokens, token_ids
-        )
+        prefix = common_prefix_length(self.cached_tokens, token_ids)
 
         # Always leave at least one token for the forward pass.
         prefix = min(prefix, len(token_ids) - 1)
@@ -240,9 +223,7 @@ class ChatSession:
         if not self.cache_enabled or self.prompt_cache is None:
             return
 
-        processed_sequence = (
-            self.cached_tokens + input_tokens + generated_tokens
-        )
+        processed_sequence = self.cached_tokens + input_tokens + generated_tokens
 
         size = self.cache_size()
 
@@ -250,10 +231,9 @@ class ChatSession:
             self.clear_cache()
             return
 
-        if (
-            self.cache_strategy == "append_only"
-            and size < len(self.cached_tokens) + len(input_tokens)
-        ):
+        if self.cache_strategy == "append_only" and size < len(
+            self.cached_tokens
+        ) + len(input_tokens):
             self.clear_cache()
             return
 
@@ -336,9 +316,7 @@ class ChatSession:
 
     def stream(self, user_input: str):
         prepared = self.prepare_messages(
-            self.messages + [
-                {"role": "user", "content": user_input}
-            ]
+            self.messages + [{"role": "user", "content": user_input}]
         )
 
         yield from self.stream_prepared(prepared)

@@ -3,6 +3,8 @@ name = "local-llm"
 version = "0.1.0"
 description = "Local LLM on Apple Silicon"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Manh Dinh", email = "manh9203@gmail.com" }
 ]
@@ -30,3 +32,21 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+addopts = "--strict-markers"
+markers = [
+    "unit: deterministic tests with no model weights or external services",
+    "api: CPU HTTP integration with an injected fake engine",
+    "mlx: real MLX inference; requires Apple Silicon and model weights",
+    "tokenizer: real Hugging Face tokenizer; may require downloads",
+    "docker: executable grader integration; requires Docker",
+    "benchmark: performance measurement, excluded from routine tests",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+extend-exclude = ["outputs"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "PLC0415"]

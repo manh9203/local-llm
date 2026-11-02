@@ -90,8 +90,7 @@ class CompactionService:
                     checkpoint = candidate_checkpoint
 
                     logger.info(
-                        "Compaction accepted: saved=%d tokens "
-                        "covered=%d",
+                        "Compaction accepted: saved=%d tokens covered=%d",
                         actual_savings,
                         checkpoint.covered_count,
                     )
@@ -104,17 +103,11 @@ class CompactionService:
                     )
 
             except Exception:
-                logger.exception(
-                    "Compaction failed; preserving previous checkpoint"
-                )
+                logger.exception("Compaction failed; preserving previous checkpoint")
 
         return CompactionResult(
-            messages=build_effective_messages(
-                messages, checkpoint, model_id
-            ),
+            messages=build_effective_messages(messages, checkpoint, model_id),
             compacted=False,
-            covered_count=(
-                checkpoint.covered_count if checkpoint else 0
-            ),
+            covered_count=(checkpoint.covered_count if checkpoint else 0),
             summary=checkpoint.summary if checkpoint else None,
         )

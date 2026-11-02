@@ -1,6 +1,6 @@
 import pytest
 
-from local_llm.chat import ChatConfig
+from local_llm.config import ChatConfig
 from local_llm.inference.context import ContextStats, prepare_context
 from local_llm.inference.engine import ChatSession
 
@@ -27,9 +27,7 @@ def test_context_truncation_removes_oldest_exchange():
 
     session.tokenize_messages = fake_tokenize
 
-    pending, token_ids = session.prepare_prompt(
-        "Latest question"
-    )
+    pending, token_ids = session.prepare_prompt("Latest question")
 
     assert len(token_ids) <= 40
 
@@ -77,9 +75,7 @@ def test_prompt_fits():
     assert result.messages == messages
     assert result.context_stats.dropped_turns == 0
     assert not result.context_stats.truncated
-    assert result.context_stats.effective_tokens == len(
-        result.token_ids
-    )
+    assert result.context_stats.effective_tokens == len(result.token_ids)
 
 
 def test_drops_oldest_turns_first():

@@ -27,9 +27,7 @@ def memory_snapshot(label):
     }
 
     if hasattr(mx, "get_cache_memory"):
-        result["allocator_cache_gb"] = (
-            mx.get_cache_memory() / 1e9
-        )
+        result["allocator_cache_gb"] = mx.get_cache_memory() / 1e9
 
     print(
         f"{label:<30} "
@@ -91,9 +89,7 @@ def main():
     checkpoint = engine.create_session()
 
     if checkpoint.cache_strategy != "append_only":
-        raise RuntimeError(
-            "This benchmark requires append-only caching"
-        )
+        raise RuntimeError("This benchmark requires append-only caching")
 
     results = {
         "model": args.model,
@@ -103,9 +99,7 @@ def main():
     }
 
     def snapshot(label):
-        results["snapshots"].append(
-            memory_snapshot(label)
-        )
+        results["snapshots"].append(memory_snapshot(label))
 
     print("\n=== Baseline ===")
     snapshot("Model loaded")
@@ -114,8 +108,7 @@ def main():
 
     initial = generate(
         checkpoint,
-        CONTEXT * args.repetitions
-        + "\nWhat are the main goals of this assistant?",
+        CONTEXT * args.repetitions + "\nWhat are the main goals of this assistant?",
     )
 
     results["operations"]["initial_generation"] = initial
@@ -148,10 +141,7 @@ def main():
         "clone_c_seconds": clone_c_seconds,
     }
 
-    print(
-        f"Clone B: {clone_b_seconds:.4f}s\n"
-        f"Clone C: {clone_c_seconds:.4f}s"
-    )
+    print(f"Clone B: {clone_b_seconds:.4f}s\nClone C: {clone_c_seconds:.4f}s")
 
     print("\n=== Advance branches ===")
 

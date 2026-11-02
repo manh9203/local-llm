@@ -38,7 +38,8 @@ def test_non_thinking_prefix_consistency(model_id, patch_fn):
     )
 
     next_prompt = tokenizer.apply_chat_template(
-        history + [
+        history
+        + [
             {
                 "role": "assistant",
                 "content": "MLX is a machine learning framework.",
@@ -51,13 +52,11 @@ def test_non_thinking_prefix_consistency(model_id, patch_fn):
         return_dict=False,
     )
 
-    assert next_prompt[:len(first_prompt)] == first_prompt
+    assert next_prompt[: len(first_prompt)] == first_prompt
 
 
 def test_qwen35_thinking_mode_unchanged():
-    tokenizer = AutoTokenizer.from_pretrained(
-        "mlx-community/Qwen3.5-9B-4bit"
-    )
+    tokenizer = AutoTokenizer.from_pretrained("mlx-community/Qwen3.5-9B-4bit")
 
     history = [
         {"role": "system", "content": "You are helpful."},

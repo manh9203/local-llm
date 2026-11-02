@@ -49,9 +49,7 @@ class FakeSession:
 
     def prepare_prompt(self, user_input):
         return (
-            self.messages + [
-                {"role": "user", "content": user_input}
-            ],
+            self.messages + [{"role": "user", "content": user_input}],
             [1, 2, 3],
         )
 
@@ -63,11 +61,7 @@ class FakeSession:
         return len(self.cached_tokens)
 
     def tokenize_messages(self, messages):
-        return [
-            ord(c)
-            for message in messages
-            for c in message["content"]
-        ]
+        return [ord(c) for message in messages for c in message["content"]]
 
     def prepare_messages(self, messages):
         return prepare_context(
@@ -99,10 +93,12 @@ class FakeSummarizer:
         self.calls = []
 
     def summarize(self, messages, previous_summary, max_tokens):
-        self.calls.append({
-            "messages": messages,
-            "previous_summary": previous_summary,
-        })
+        self.calls.append(
+            {
+                "messages": messages,
+                "previous_summary": previous_summary,
+            }
+        )
         return "The user is building an MLX inference engine."
 
 
@@ -130,9 +126,7 @@ def test_chat_completion():
             "/v1/chat/completions",
             json={
                 "model": MODEL_ID,
-                "messages": [
-                    {"role": "user", "content": "Hello"}
-                ],
+                "messages": [{"role": "user", "content": "Hello"}],
             },
         )
 
@@ -141,10 +135,7 @@ def test_chat_completion():
     result = response.json()
 
     assert result["object"] == "chat.completion"
-    assert (
-        result["choices"][0]["message"]["content"]
-        == "Hello from MLX!"
-    )
+    assert result["choices"][0]["message"]["content"] == "Hello from MLX!"
 
     usage = result["usage"]
 
@@ -171,9 +162,7 @@ def test_rejects_unknown_model():
             "/v1/chat/completions",
             json={
                 "model": "unknown-model",
-                "messages": [
-                    {"role": "user", "content": "Hi"}
-                ],
+                "messages": [{"role": "user", "content": "Hi"}],
             },
         )
 
@@ -186,9 +175,7 @@ def test_rejects_invalid_conversation():
             "/v1/chat/completions",
             json={
                 "model": MODEL_ID,
-                "messages": [
-                    {"role": "assistant", "content": "Hello"}
-                ],
+                "messages": [{"role": "assistant", "content": "Hello"}],
             },
         )
 
@@ -219,9 +206,7 @@ def test_streaming_chat_completion():
             "/v1/chat/completions",
             json={
                 "model": MODEL_ID,
-                "messages": [
-                    {"role": "user", "content": "Hello"}
-                ],
+                "messages": [{"role": "user", "content": "Hello"}],
                 "stream": True,
             },
         )
@@ -234,8 +219,7 @@ def test_streaming_chat_completion():
     assert events[0]["choices"][0]["delta"]["role"] == "assistant"
 
     content = "".join(
-        event["choices"][0]["delta"].get("content", "")
-        for event in events
+        event["choices"][0]["delta"].get("content", "") for event in events
     )
 
     assert content == "Hello from MLX!"
@@ -247,10 +231,7 @@ def test_streaming_chat_completion():
 
     # All events belong to the same completion.
     assert len({event["id"] for event in events}) == 1
-    assert all(
-        event["object"] == "chat.completion.chunk"
-        for event in events
-    )
+    assert all(event["object"] == "chat.completion.chunk" for event in events)
 
 
 def test_streaming_preserves_request_history():
@@ -309,35 +290,36 @@ def test_api_compacts_before_generation():
     messages = []
 
     for i in range(5):
-        messages.extend([
-            {
-                "role": "user",
-                "content": (
-                    f"Question {i}: "
-                    + "I am developing a local LLM inference engine "
-                    "with MLX, FastAPI, KV-cache reuse, and "
-                    "conversation compaction. " * 5
-                ),
-            },
-            {
-                "role": "assistant",
-                "content": (
-                    f"Answer {i}: "
-                    + "We should optimize prefill latency, "
-                    "decoding throughput, memory usage, "
-                    "and prompt-cache retention. " * 5
-                ),
-            },
-        ])
+        messages.extend(
+            [
+                {
+                    "role": "user",
+                    "content": (
+                        f"Question {i}: "
+                        + "I am developing a local LLM inference engine "
+                        "with MLX, FastAPI, KV-cache reuse, and "
+                        "conversation compaction. " * 5
+                    ),
+                },
+                {
+                    "role": "assistant",
+                    "content": (
+                        f"Answer {i}: " + "We should optimize prefill latency, "
+                        "decoding throughput, memory usage, "
+                        "and prompt-cache retention. " * 5
+                    ),
+                },
+            ]
+        )
 
-    messages.append({
-        "role": "user",
-        "content": "What should we do next?",
-    })
+    messages.append(
+        {
+            "role": "user",
+            "content": "What should we do next?",
+        }
+    )
 
-    with TestClient(
-        create_app(engine, compaction_service=service)
-    ) as client:
+    with TestClient(create_app(engine, compaction_service=service)) as client:
         response = client.post(
             "/v1/chat/completions",
             json={
@@ -364,9 +346,7 @@ def test_api_compacts_before_generation():
 
     assert len(prepared.messages) < len(messages) + 1
 
-    assert prepared.messages[-1]["content"] == (
-        "What should we do next?"
-    )
+    assert prepared.messages[-1]["content"] == ("What should we do next?")
 
 
 def test_models_endpoint_uses_active_model():

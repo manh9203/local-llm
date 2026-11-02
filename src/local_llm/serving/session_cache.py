@@ -46,10 +46,7 @@ class SessionCacheManager:
             )
 
             if session.cache_strategy == "append_only":
-                if (
-                    prefix != len(cached_tokens)
-                    or len(cached_tokens) >= len(token_ids)
-                ):
+                if prefix != len(cached_tokens) or len(cached_tokens) >= len(token_ids):
                     continue
             elif session.cache_strategy != "trimmable":
                 continue
@@ -58,10 +55,7 @@ class SessionCacheManager:
                 best_index = i
                 best_prefix = prefix
 
-        hit = (
-            best_index is not None
-            and best_prefix >= self.min_prefix_tokens
-        )
+        hit = best_index is not None and best_prefix >= self.min_prefix_tokens
 
         if hit:
             if self.sessions[best_index].cache_strategy == "append_only":
@@ -76,8 +70,7 @@ class SessionCacheManager:
             session = self.engine.create_session()
 
         logger.info(
-            "Cache lookup: hit=%s prefix=%d threshold=%d "
-            "available_sessions=%d",
+            "Cache lookup: hit=%s prefix=%d threshold=%d available_sessions=%d",
             hit,
             best_prefix,
             self.min_prefix_tokens,
@@ -121,10 +114,7 @@ class SessionCacheManager:
             old.clear_cache()
 
         # Enforce aggregate cached-token budget.
-        while (
-            sum(len(s.cached_tokens) for s in self.sessions)
-            > self.max_cached_tokens
-        ):
+        while sum(len(s.cached_tokens) for s in self.sessions) > self.max_cached_tokens:
             old = self.sessions.pop(0)
             logger.info(
                 "Cache evicted: reason=token_budget tokens=%d",

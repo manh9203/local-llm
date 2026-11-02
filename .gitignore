@@ -41,3 +41,17 @@ outputs/
 # Open WebUI secrets and runtime data
 .webui_secret_key
 .open-webui/
+
+# Build, packaging, type checks, and local tool state
+build/
+dist/
+.mypy_cache/
+.pyright/
+.hypothesis/
+coverage.xml
+junit*.xml
+.uv-cache/
+.huggingface/
+.cache/
+*.dylib
+*.so

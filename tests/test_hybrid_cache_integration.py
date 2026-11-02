@@ -24,10 +24,9 @@ def test_qwen35_cache_clone_independence():
 
     checkpoint = engine.create_session()
 
-    "".join(checkpoint.stream(
-        "My laptop has 16 GB of unified memory. "
-        "Acknowledge briefly."
-    ))
+    "".join(
+        checkpoint.stream("My laptop has 16 GB of unified memory. Acknowledge briefly.")
+    )
 
     assert checkpoint.prompt_cache is not None
     assert checkpoint.cached_tokens
@@ -41,9 +40,7 @@ def test_qwen35_cache_clone_independence():
     assert branch_a.prompt_cache is not checkpoint.prompt_cache
     assert branch_b.prompt_cache is not checkpoint.prompt_cache
 
-    answer_a = "".join(branch_a.stream(
-        "How much unified memory does my laptop have?"
-    ))
+    answer_a = "".join(branch_a.stream("How much unified memory does my laptop have?"))
 
     assert "16" in answer_a
     assert branch_a.last_stats["reused_tokens"] > 0
@@ -52,9 +49,7 @@ def test_qwen35_cache_clone_independence():
     assert checkpoint.cached_tokens == original_tokens
     assert checkpoint.cache_size() == original_size
 
-    answer_b = "".join(branch_b.stream(
-        "What memory specification did I mention?"
-    ))
+    answer_b = "".join(branch_b.stream("What memory specification did I mention?"))
 
     assert "16" in answer_b
     assert branch_b.last_stats["reused_tokens"] > 0
@@ -65,9 +60,7 @@ def test_qwen35_cache_clone_independence():
     # Reuse the checkpoint again after both forks.
     branch_c = checkpoint.clone_cached_session()
 
-    answer_c = "".join(branch_c.stream(
-        "Repeat the memory capacity I mentioned."
-    ))
+    answer_c = "".join(branch_c.stream("Repeat the memory capacity I mentioned."))
 
     assert "16" in answer_c
     assert branch_c.last_stats["reused_tokens"] > 0
@@ -93,18 +86,14 @@ def test_qwen35_cancelled_branch_preserves_checkpoint():
 
     checkpoint = engine.create_session()
 
-    "".join(checkpoint.stream(
-        "Remember that my laptop has 16 GB of memory."
-    ))
+    "".join(checkpoint.stream("Remember that my laptop has 16 GB of memory."))
 
     original_tokens = checkpoint.cached_tokens.copy()
     original_size = checkpoint.cache_size()
 
     branch = checkpoint.clone_cached_session()
 
-    stream = branch.stream(
-        "Explain how recurrent attention works in detail."
-    )
+    stream = branch.stream("Explain how recurrent attention works in detail.")
 
     next(stream)
     stream.close()
@@ -117,9 +106,7 @@ def test_qwen35_cancelled_branch_preserves_checkpoint():
 
     another_branch = checkpoint.clone_cached_session()
 
-    answer = "".join(another_branch.stream(
-        "How much memory does my laptop have?"
-    ))
+    answer = "".join(another_branch.stream("How much memory does my laptop have?"))
 
     assert "16" in answer
     assert another_branch.last_stats["reused_tokens"] > 0

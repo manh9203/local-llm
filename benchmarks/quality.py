@@ -44,12 +44,24 @@ def model_metadata(engine) -> dict:
     if "snapshots" in parts and parts.index("snapshots") + 1 < len(parts):
         revision = parts[parts.index("snapshots") + 1]
     if revision is None:
-        cache = Path(os.environ.get("HF_HUB_CACHE", str(
-            Path(os.environ.get("HF_HOME", str(
-                Path.home() / ".cache/huggingface"))) / "hub"
-        )))
-        ref = cache / \
-            ("models--" + engine.config.model_id.replace("/", "--")) / "refs/main"
+        cache = Path(
+            os.environ.get(
+                "HF_HUB_CACHE",
+                str(
+                    Path(
+                        os.environ.get(
+                            "HF_HOME", str(Path.home() / ".cache/huggingface")
+                        )
+                    )
+                    / "hub"
+                ),
+            )
+        )
+        ref = (
+            cache
+            / ("models--" + engine.config.model_id.replace("/", "--"))
+            / "refs/main"
+        )
         try:
             if ref.is_file():
                 revision = ref.read_text().strip()
@@ -58,22 +70,36 @@ def model_metadata(engine) -> dict:
     template = getattr(tokenizer, "chat_template", None)
     return {
         "revision": revision,
-        "revision_source": "tokenizer_path" if "snapshots" in parts else "cache_ref" if revision else None,
-        "chat_template_sha256": hashlib.sha256(template.encode()).hexdigest() if isinstance(template, str) else None,
+        "revision_source": "tokenizer_path"
+        if "snapshots" in parts
+        else "cache_ref"
+        if revision
+        else None,
+        "chat_template_sha256": hashlib.sha256(template.encode()).hexdigest()
+        if isinstance(template, str)
+        else None,
     }
 
 
 def is_fatal(error: Exception) -> bool:
     return isinstance(error, MemoryError) or any(
         text in str(error).casefold()
-        for text in ("out of memory", "failed to allocate", "allocation failed", "device lost", "no metal device")
+        for text in (
+            "out of memory",
+            "failed to allocate",
+            "allocation failed",
+            "device lost",
+            "no metal device",
+        )
     )
 
 
 def failure(error: Exception, stage: str, **partial) -> dict:
     return {
         **partial,
-        "status": "configuration_error" if stage == "prepare" and isinstance(error, ValueError) else "inference_error",
+        "status": "configuration_error"
+        if stage == "prepare" and isinstance(error, ValueError)
+        else "inference_error",
         "error": {"type": type(error).__name__, "message": str(error), "stage": stage},
         "fatal_error": is_fatal(error),
     }
@@ -82,8 +108,14 @@ def failure(error: Exception, stage: str, **partial) -> dict:
 def generate_answer(engine, messages: list[dict], max_new_tokens: int = 128) -> dict:
     session = None
     chunks = []
-    result = {"answer": "", "prompt_tokens": None, "generated_tokens": 0,
-              "ttft_seconds": None, "elapsed_seconds": None, "finish_reason": None}
+    result = {
+        "answer": "",
+        "prompt_tokens": None,
+        "generated_tokens": 0,
+        "ttft_seconds": None,
+        "elapsed_seconds": None,
+        "finish_reason": None,
+    }
     stage = "prepare"
     started = None
     try:
@@ -91,10 +123,12 @@ def generate_answer(engine, messages: list[dict], max_new_tokens: int = 128) -> 
         session.config = replace(engine.config, max_new_tokens=max_new_tokens)
         prepared = session.prepare_messages(messages)
         result["prompt_tokens"] = getattr(
-            prepared.context_stats, "original_tokens", len(prepared.token_ids))
+            prepared.context_stats, "original_tokens", len(prepared.token_ids)
+        )
         if prepared.context_stats.truncated or prepared.messages != messages:
             raise ValueError(
-                "Evaluation prompt exceeds its input budget; task was not run")
+                "Evaluation prompt exceeds its input budget; task was not run"
+            )
         stage = "generate"
         started = perf_counter()
         # extend retains yielded chunks even when the stream raises midway.
@@ -109,13 +143,16 @@ def generate_answer(engine, messages: list[dict], max_new_tokens: int = 128) -> 
             finish_reason=stats["finish_reason"],
             peak_memory_gb=stats.get("peak_memory_gb"),
         )
-        result["status"] = "incomplete" if stats["finish_reason"] == "length" else "completed"
+        result["status"] = (
+            "incomplete" if stats["finish_reason"] == "length" else "completed"
+        )
     except Exception as error:  # noqa: BLE001 - Preserve partial output and record model failures.
         if started is not None:
             result["elapsed_seconds"] = perf_counter() - started
         if session is not None:
             result["generated_tokens"] = len(
-                getattr(session, "last_generated_tokens", []))
+                getattr(session, "last_generated_tokens", [])
+            )
         result = failure(error, stage, **result)
     finally:
         result["answer"] = "".join(chunks).strip()
@@ -146,33 +183,48 @@ def run_compaction_case(engine, row: dict, summary_tokens: int, summarizer_facto
             started = perf_counter()
             summary = summarizer.summarize(
                 messages=history[previous_covered:covered_count],
-                previous_summary=previous_summary, max_tokens=summary_tokens,
+                previous_summary=previous_summary,
+                max_tokens=summary_tokens,
             )
             checkpoint = manager.create(
-                messages=history, covered_count=covered_count,
-                summary=summary, model_id=engine.config.model_id,
+                messages=history,
+                covered_count=covered_count,
+                summary=summary,
+                model_id=engine.config.model_id,
             )
-            row["rounds"].append({
-                "round": number, "covered_count": covered_count, "summary": summary,
-                "summary_seconds": perf_counter() - started,
-                "stats": asdict(summarizer.last_stats) if summarizer.last_stats else None,
-            })
+            row["rounds"].append(
+                {
+                    "round": number,
+                    "covered_count": covered_count,
+                    "summary": summary,
+                    "summary_seconds": perf_counter() - started,
+                    "stats": asdict(summarizer.last_stats)
+                    if summarizer.last_stats
+                    else None,
+                }
+            )
             previous_summary, previous_covered = summary, covered_count
             print(f"  Round {number}: covered={covered_count}", flush=True)
-        for probe, evaluation in zip(definition["probes"], row["evaluations"], strict=True):
-            question = probe["question"] + definition["instructions"] + \
-                json.dumps(probe["answer_format"])
+        for probe, evaluation in zip(
+            definition["probes"], row["evaluations"], strict=True
+        ):
+            question = (
+                probe["question"]
+                + definition["instructions"]
+                + json.dumps(probe["answer_format"])
+            )
             evaluation["question"] = question
             full = history + [{"role": "user", "content": question}]
             compacted = build_effective_messages(
-                full, checkpoint, engine.config.model_id)
+                full, checkpoint, engine.config.model_id
+            )
             for mode, messages in (("full", full), ("compacted", compacted)):
                 evaluation[mode] = generate_answer(
-                    engine, messages, definition["max_new_tokens"])
+                    engine, messages, definition["max_new_tokens"]
+                )
                 if evaluation[mode].get("fatal_error"):
                     return
-            print(
-                f"  {probe['name']}: evaluated full and compacted", flush=True)
+            print(f"  {probe['name']}: evaluated full and compacted", flush=True)
     except Exception as error:  # noqa: BLE001 - Record a failed summary without losing other cases.
         for evaluation in row["evaluations"]:
             for mode in ("full", "compacted"):
@@ -183,8 +235,14 @@ def run_compaction_case(engine, row: dict, summary_tokens: int, summarizer_facto
 def save_progress(path: Path, report: dict) -> None:
     temporary = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix=f".{path.name}.",
-                                         suffix=".tmp", delete=False, encoding="utf-8") as output:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+            encoding="utf-8",
+        ) as output:
             temporary = Path(output.name)
             json.dump(report, output, indent=2, ensure_ascii=False)
             output.write("\n")
@@ -194,32 +252,57 @@ def save_progress(path: Path, report: dict) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def run_benchmark(config: ChatConfig, suite: str, cases: tuple, output: Path,
-                  engine_factory, summarizer_factory=None, summary_tokens: int = 512,
-                  max_probes: int | None = None) -> dict:
+def run_benchmark(
+    config: ChatConfig,
+    suite: str,
+    cases: tuple,
+    output: Path,
+    engine_factory,
+    summarizer_factory=None,
+    summary_tokens: int = 512,
+    max_probes: int | None = None,
+) -> dict:
     definitions = case_manifest(suite, cases, max_probes)
     if config.use_cache or config.enable_thinking or config.temperature != 0:
         raise ValueError(
-            "Quality evaluation requires cache/thinking off and temperature zero")
+            "Quality evaluation requires cache/thinking off and temperature zero"
+        )
     rows = []
     for definition in definitions:
         modes = ("direct",) if suite == "capability" else ("full", "compacted")
-        probes = [{"name": definition["id"]}
-                  ] if suite == "capability" else definition["probes"]
-        rows.append({"definition": definition, "rounds": [], "evaluations": [
-            {"probe": probe["name"], **{mode: {"status": "pending"}
-                                        for mode in modes}}
-            for probe in probes
-        ]})
+        probes = (
+            [{"name": definition["id"]}]
+            if suite == "capability"
+            else definition["probes"]
+        )
+        rows.append(
+            {
+                "definition": definition,
+                "rounds": [],
+                "evaluations": [
+                    {
+                        "probe": probe["name"],
+                        **{mode: {"status": "pending"} for mode in modes},
+                    }
+                    for probe in probes
+                ],
+            }
+        )
     report = {
-        "protocol": PROTOCOL_VERSION, "scoring_version": SCORING_VERSION,
-        "suite": suite, "model": config.model_id, "config": asdict(config),
-        "case_set_hash": case_set_hash(suite, definitions), "runtime": runtime_versions(),
-        "run_status": "running", "results": rows,
+        "protocol": PROTOCOL_VERSION,
+        "scoring_version": SCORING_VERSION,
+        "suite": suite,
+        "model": config.model_id,
+        "config": asdict(config),
+        "case_set_hash": case_set_hash(suite, definitions),
+        "runtime": runtime_versions(),
+        "run_status": "running",
+        "results": rows,
     }
     if suite == "compaction":
-        report.update(summary_tokens=summary_tokens,
-                      recent_turns_to_keep=RECENT_TURNS_TO_KEEP)
+        report.update(
+            summary_tokens=summary_tokens, recent_turns_to_keep=RECENT_TURNS_TO_KEEP
+        )
         if summarizer_factory is None:
             raise ValueError("Compaction requires a summarizer factory")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -235,15 +318,19 @@ def run_benchmark(config: ChatConfig, suite: str, cases: tuple, output: Path,
             print(f"\n=== {definition['id']} ===", flush=True)
             if suite == "capability":
                 row["evaluations"][0]["direct"] = generate_answer(
-                    engine, with_system(
-                        config, definition["messages"]), definition["max_new_tokens"]
+                    engine,
+                    with_system(config, definition["messages"]),
+                    definition["max_new_tokens"],
                 )
             else:
-                run_compaction_case(
-                    engine, row, summary_tokens, summarizer_factory)
+                run_compaction_case(engine, row, summary_tokens, summarizer_factory)
             save_progress(output, report)
-            if any(response.get("fatal_error") for evaluation in row["evaluations"]
-                   for response in evaluation.values() if isinstance(response, dict)):
+            if any(
+                response.get("fatal_error")
+                for evaluation in row["evaluations"]
+                for response in evaluation.values()
+                if isinstance(response, dict)
+            ):
                 report["run_status"] = "aborted"
                 break
         else:
@@ -260,8 +347,9 @@ def run_benchmark(config: ChatConfig, suite: str, cases: tuple, output: Path,
 
 def main(engine_factory, summarizer_factory):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--suite", choices=("compaction",
-                        "capability"), default="compaction")
+    parser.add_argument(
+        "--suite", choices=("compaction", "capability"), default="compaction"
+    )
     parser.add_argument("--model", default=DEFAULT_MODEL_ID)
     parser.add_argument("--case", default="all")
     parser.add_argument("--category", default="all")
@@ -271,27 +359,44 @@ def main(engine_factory, summarizer_factory):
     args = parser.parse_args()
     try:
         get_model_spec(args.model)
-        if args.max_probes is not None and (args.max_probes < 1 or args.suite != "compaction"):
-            raise ValueError(
-                "--max-probes is a positive compaction-only option")
+        if args.max_probes is not None and (
+            args.max_probes < 1 or args.suite != "compaction"
+        ):
+            raise ValueError("--max-probes is a positive compaction-only option")
         if not 0 < args.summary_tokens < 8192:
             raise ValueError("--summary-tokens must be between 1 and 8191")
         cases = select_cases(args.suite, args.case, args.category)
         # Validate before loading weights or creating a result file.
         case_manifest(args.suite, cases, args.max_probes)
-        config = ChatConfig(model_id=args.model, temperature=0, enable_thinking=False,
-                            use_cache=False, max_context_tokens=8192, max_new_tokens=128)
-        report = run_benchmark(config, args.suite, cases, args.output, engine_factory,
-                               summarizer_factory, args.summary_tokens, args.max_probes)
+        config = ChatConfig(
+            model_id=args.model,
+            temperature=0,
+            enable_thinking=False,
+            use_cache=False,
+            max_context_tokens=8192,
+            max_new_tokens=128,
+        )
+        report = run_benchmark(
+            config,
+            args.suite,
+            cases,
+            args.output,
+            engine_factory,
+            summarizer_factory,
+            args.summary_tokens,
+            args.max_probes,
+        )
     except (ValueError, OSError) as error:
         parser.exit(1, f"{error}\n")
     scores = score_run(report)
-    print(json.dumps({key: scores[key] for key in (
-        "suite", "run_status", "summary")}, indent=2))
+    print(
+        json.dumps(
+            {key: scores[key] for key in ("suite", "run_status", "summary")}, indent=2
+        )
+    )
     print(f"Results: {args.output}")
     if report["run_status"] == "aborted":
-        parser.exit(
-            1, "Evaluation aborted; completed and pending cases are saved.\n")
+        parser.exit(1, "Evaluation aborted; completed and pending cases are saved.\n")
 
 
 if __name__ == "__main__":

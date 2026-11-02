@@ -10,11 +10,13 @@ class FakeSummarizer:
         self.calls = []
 
     def summarize(self, messages, previous_summary, max_tokens):
-        self.calls.append({
-            "messages": [m.copy() for m in messages],
-            "previous_summary": previous_summary,
-            "max_tokens": max_tokens,
-        })
+        self.calls.append(
+            {
+                "messages": [m.copy() for m in messages],
+                "previous_summary": previous_summary,
+                "max_tokens": max_tokens,
+            }
+        )
 
         return f"Summary version {len(self.calls)}"
 
@@ -26,26 +28,26 @@ class FailingSummarizer:
 
 def tokenize(messages):
     # Deterministic simple tokenizer for testing.
-    return [
-        ord(c)
-        for message in messages
-        for c in message["content"]
-    ]
+    return [ord(c) for message in messages for c in message["content"]]
 
 
 def make_history(completed_turns: int):
     result = [{"role": "system", "content": "Be helpful"}]
 
     for i in range(completed_turns):
-        result.extend([
-            {"role": "user", "content": f"Question {i}: " + "X" * 40},
-            {"role": "assistant", "content": f"Answer {i}: " + "Y" * 40},
-        ])
+        result.extend(
+            [
+                {"role": "user", "content": f"Question {i}: " + "X" * 40},
+                {"role": "assistant", "content": f"Answer {i}: " + "Y" * 40},
+            ]
+        )
 
-    result.append({
-        "role": "user",
-        "content": "What should I do next?",
-    })
+    result.append(
+        {
+            "role": "user",
+            "content": "What should I do next?",
+        }
+    )
 
     return result
 
@@ -71,9 +73,7 @@ def test_below_threshold_does_not_compact():
     service = make_service(fake)
     history = make_history(4)
 
-    result = service.compact_if_needed(
-        history, MODEL, tokenize, input_budget=10000
-    )
+    result = service.compact_if_needed(history, MODEL, tokenize, input_budget=10000)
 
     assert not result.compacted
     assert not fake.calls
@@ -85,9 +85,7 @@ def test_initial_compaction():
     service = make_service(fake)
     history = make_history(5)
 
-    result = service.compact_if_needed(
-        history, MODEL, tokenize, input_budget=300
-    )
+    result = service.compact_if_needed(history, MODEL, tokenize, input_budget=300)
 
     assert result.compacted
     assert result.covered_count == 7
@@ -104,9 +102,7 @@ def test_incremental_compaction():
     service = make_service(fake)
 
     history = make_history(5)
-    first = service.compact_if_needed(
-        history, MODEL, tokenize, input_budget=300
-    )
+    first = service.compact_if_needed(history, MODEL, tokenize, input_budget=300)
 
     assert first.compacted
 
@@ -119,18 +115,13 @@ def test_incremental_compaction():
         history[-1],
     ]
 
-    second = service.compact_if_needed(
-        updated, MODEL, tokenize, input_budget=300
-    )
+    second = service.compact_if_needed(updated, MODEL, tokenize, input_budget=300)
 
     assert second.compacted
     assert second.covered_count > first.covered_count
 
     # Only newly covered messages are summarized.
-    assert (
-        fake.calls[1]["previous_summary"]
-        == first.summary
-    )
+    assert fake.calls[1]["previous_summary"] == first.summary
     assert len(fake.calls[1]["messages"]) == (
         second.covered_count - first.covered_count
     )
@@ -141,9 +132,7 @@ def test_failed_compaction_does_not_save_checkpoint():
     service = make_service(FailingSummarizer(), manager)
     history = make_history(5)
 
-    result = service.compact_if_needed(
-        history, MODEL, tokenize, input_budget=300
-    )
+    result = service.compact_if_needed(history, MODEL, tokenize, input_budget=300)
 
     assert not result.compacted
     assert len(manager) == 0

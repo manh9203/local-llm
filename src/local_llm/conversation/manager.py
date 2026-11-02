@@ -28,9 +28,9 @@ class ConversationManager:
             raise ValueError("max_checkpoints must be positive")
 
         self.max_checkpoints = max_checkpoints
-        self._checkpoints: OrderedDict[
-            CheckpointKey, CompactionCheckpoint
-        ] = OrderedDict()
+        self._checkpoints: OrderedDict[CheckpointKey, CompactionCheckpoint] = (
+            OrderedDict()
+        )
 
     def save(self, checkpoint: CompactionCheckpoint) -> None:
         key = checkpoint_key(checkpoint)
@@ -72,8 +72,7 @@ class ConversationManager:
 
             if (
                 best_checkpoint is None
-                or checkpoint.covered_count
-                > best_checkpoint.covered_count
+                or checkpoint.covered_count > best_checkpoint.covered_count
             ):
                 best_key = key
                 best_checkpoint = checkpoint
@@ -123,14 +122,9 @@ def build_effective_messages(
         + "\n[/Previous conversation summary]"
     )
 
-    system["content"] = (
-        original_system_content + "\n\n" + summary_block
-    ).strip()
+    system["content"] = (original_system_content + "\n\n" + summary_block).strip()
 
     # Everything after the covered prefix is preserved verbatim.
-    remaining = [
-        message.copy()
-        for message in messages[checkpoint.covered_count:]
-    ]
+    remaining = [message.copy() for message in messages[checkpoint.covered_count :]]
 
     return [system] + remaining

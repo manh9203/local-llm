@@ -6,8 +6,9 @@ def main():
     engine = InferenceEngine(ChatConfig())
     session = engine.create_session()
 
-    print("\nCommands: /help, /clear, /stats, "
-          "/cache on, /cache off, /cache reset, /exit")
+    print(
+        "\nCommands: /help, /clear, /stats, /cache on, /cache off, /cache reset, /exit"
+    )
 
     while True:
         try:

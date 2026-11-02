@@ -19,8 +19,7 @@ def fix_qwen3_chat_template(tokenizer):
 
     if template.count(old) != 1:
         raise ValueError(
-            "Unexpected Qwen3 template structure. "
-            "Refusing to modify the template."
+            "Unexpected Qwen3 template structure. Refusing to modify the template."
         )
 
     tokenizer.chat_template = template.replace(old, new, 1)

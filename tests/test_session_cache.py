@@ -29,9 +29,7 @@ class FakeSession:
         )
         clone.cached_tokens = self.cached_tokens.copy()
         clone.prompt_cache = (
-            SimpleNamespace()
-            if self.prompt_cache is not None
-            else None
+            SimpleNamespace() if self.prompt_cache is not None else None
         )
         clone.messages = [message.copy() for message in self.messages]
         return clone
@@ -53,11 +51,7 @@ class FakeEngine:
     @staticmethod
     def tokenize(messages):
         # Deterministic fake tokenization.
-        return [
-            ord(char)
-            for message in messages
-            for char in message["content"]
-        ]
+        return [ord(char) for message in messages for char in message["content"]]
 
 
 def messages(text):
@@ -84,9 +78,7 @@ def test_reuses_matching_prefix():
     second = manager.acquire(engine.tokenize(messages("hello world")))
 
     assert second is first
-    assert second.cached_tokens == [
-        ord(c) for c in "hello"
-    ]
+    assert second.cached_tokens == [ord(c) for c in "hello"]
 
 
 def test_different_prefix_creates_new_session():

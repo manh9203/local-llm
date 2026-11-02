@@ -42,10 +42,7 @@ class CompactionCheckpoint:
         if len(messages) < self.covered_count:
             return False
 
-        return (
-            history_fingerprint(messages[:self.covered_count])
-            == self.covered_hash
-        )
+        return history_fingerprint(messages[: self.covered_count]) == self.covered_hash
 
 
 def create_checkpoint(
@@ -66,22 +63,16 @@ def create_checkpoint(
     offset = int(messages[0]["role"] == "system")
 
     if (covered_count - offset) % 2 != 0:
-        raise ValueError(
-            "Checkpoint must end after a complete user/assistant turn"
-        )
+        raise ValueError("Checkpoint must end after a complete user/assistant turn")
 
     for i in range(offset, covered_count):
         expected = "user" if (i - offset) % 2 == 0 else "assistant"
         if messages[i]["role"] != expected:
-            raise ValueError(
-                f"Invalid message role at index {i}"
-            )
+            raise ValueError(f"Invalid message role at index {i}")
 
     return CompactionCheckpoint(
         summary=summary,
         covered_count=covered_count,
-        covered_hash=history_fingerprint(
-            messages[:covered_count]
-        ),
+        covered_hash=history_fingerprint(messages[:covered_count]),
         model_id=model_id,
     )

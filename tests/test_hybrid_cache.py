@@ -28,11 +28,7 @@ def make_session(monkeypatch, position, tokens):
         new_cache,
     )
 
-    monkeypatch.setattr(
-        engine_module,
-        "KVCache",
-        FakeKVCache,
-    )
+    monkeypatch.setattr(engine_module, "KVCache", FakeKVCache)
 
     session = ChatSession.__new__(ChatSession)
     session.model = object()
@@ -54,9 +50,7 @@ def test_append_only_reuses_exact_prefix(monkeypatch):
         tokens=[10, 20, 30],
     )
 
-    suffix, reused = session.prepare_cache(
-        [10, 20, 30, 40, 50]
-    )
+    suffix, reused = session.prepare_cache([10, 20, 30, 40, 50])
 
     assert suffix == [40, 50]
     assert reused == 3
@@ -70,9 +64,7 @@ def test_append_only_resets_on_divergence(monkeypatch):
         tokens=[10, 20, 30],
     )
 
-    suffix, reused = session.prepare_cache(
-        [10, 99, 30, 40]
-    )
+    suffix, reused = session.prepare_cache([10, 99, 30, 40])
 
     assert suffix == [10, 99, 30, 40]
     assert reused == 0
@@ -87,9 +79,7 @@ def test_append_only_resets_on_position_mismatch(monkeypatch):
         tokens=[10, 20, 30],
     )
 
-    suffix, reused = session.prepare_cache(
-        [10, 20, 30, 40]
-    )
+    suffix, reused = session.prepare_cache([10, 20, 30, 40])
 
     assert reused == 0
     assert suffix == [10, 20, 30, 40]
@@ -110,9 +100,7 @@ def test_append_only_records_processed_tokens(monkeypatch):
         generated_tokens=[60, 70, 80],
     )
 
-    assert session.cached_tokens == [
-        10, 20, 30, 40, 50, 60, 70
-    ]
+    assert session.cached_tokens == [10, 20, 30, 40, 50, 60, 70]
 
 
 def test_append_only_rejects_unaccounted_cache(monkeypatch):

@@ -58,10 +58,7 @@ def validate_messages(messages: list[ChatMessage]) -> None:
         start = 1
 
     for index in range(start, len(messages)):
-        expected = (
-            "user" if (index - start) % 2 == 0
-            else "assistant"
-        )
+        expected = "user" if (index - start) % 2 == 0 else "assistant"
 
         if messages[index].role != expected:
             raise HTTPException(
@@ -110,13 +107,13 @@ def create_app(
     compaction_service: CompactionService | None = None,
 ) -> FastAPI:
     """Create the API, optionally injecting an engine for tests."""
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         configure_logging()
 
         app.state.engine = (
-            engine if engine is not None
-            else InferenceEngine(config_from_env())
+            engine if engine is not None else InferenceEngine(config_from_env())
         )
 
         app.state.session_cache = SessionCacheManager(
@@ -170,9 +167,7 @@ def create_app(
 
         preparation_session = model_engine.create_session()
 
-        input_budget = (
-            config.max_context_tokens - config.max_new_tokens
-        )
+        input_budget = config.max_context_tokens - config.max_new_tokens
 
         started = perf_counter()
 
@@ -187,9 +182,7 @@ def create_app(
 
         # The existing pure context preparer remains responsible
         # for validating the final token budget.
-        prepared = preparation_session.prepare_messages(
-            result.messages
-        )
+        prepared = preparation_session.prepare_messages(result.messages)
 
         logger.info(
             "Compaction: new=%s covered=%d elapsed=%.3fs "
@@ -216,12 +209,14 @@ def create_app(
 
         return {
             "object": "list",
-            "data": [{
-                "id": model_id,
-                "object": "model",
-                "created": 0,
-                "owned_by": "local",
-            }],
+            "data": [
+                {
+                    "id": model_id,
+                    "object": "model",
+                    "created": 0,
+                    "owned_by": "local",
+                }
+            ],
         }
 
     @app.post("/v1/chat/completions")
@@ -237,10 +232,7 @@ def create_app(
         validate_messages(request.messages)
 
         # Open WebUI sends complete conversation history.
-        messages = [
-            message.model_dump()
-            for message in request.messages
-        ]
+        messages = [message.model_dump() for message in request.messages]
 
         if messages[0]["role"] != "system":
             messages.insert(
@@ -259,6 +251,7 @@ def create_app(
         model_id = model_engine.config.model_id
 
         if not request.stream:
+
             def run_completion():
                 # Both compaction and inference run in this thread,
                 # under the API-level inference lock.
@@ -283,8 +276,8 @@ def create_app(
 
             try:
                 async with inference_lock:
-                    answer, stats, context_stats = (
-                        await anyio.to_thread.run_sync(run_completion)
+                    answer, stats, context_stats = await anyio.to_thread.run_sync(
+                        run_completion
                     )
             except ValueError as exc:
                 raise HTTPException(
@@ -303,20 +296,20 @@ def create_app(
                 "object": "chat.completion",
                 "created": created,
                 "model": model_id,
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": answer,
-                    },
-                    "finish_reason": stats["finish_reason"],
-                }],
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": answer,
+                        },
+                        "finish_reason": stats["finish_reason"],
+                    }
+                ],
                 "usage": {
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
-                    "total_tokens": (
-                        prompt_tokens + completion_tokens
-                    ),
+                    "total_tokens": (prompt_tokens + completion_tokens),
                 },
             }
 
@@ -332,12 +325,14 @@ def create_app(
                 completed = False
 
                 try:
-                    yield sse_data(completion_chunk(
-                        completion_id,
-                        created,
-                        model_id,
-                        {"role": "assistant", "content": ""},
-                    ))
+                    yield sse_data(
+                        completion_chunk(
+                            completion_id,
+                            created,
+                            model_id,
+                            {"role": "assistant", "content": ""},
+                        )
+                    )
 
                     while True:
                         fragment = await anyio.to_thread.run_sync(
@@ -350,12 +345,14 @@ def create_app(
                             break
 
                         if fragment:
-                            yield sse_data(completion_chunk(
-                                completion_id,
-                                created,
-                                model_id,
-                                {"content": fragment},
-                            ))
+                            yield sse_data(
+                                completion_chunk(
+                                    completion_id,
+                                    created,
+                                    model_id,
+                                    {"content": fragment},
+                                )
+                            )
 
                         # Allow the event loop to observe cancellation.
                         await anyio.lowlevel.checkpoint()
@@ -363,22 +360,22 @@ def create_app(
                     stats = session.last_stats
 
                     if stats is not None:
-                        yield sse_data(completion_chunk(
-                            completion_id,
-                            created,
-                            model_id,
-                            {},
-                            stats["finish_reason"],
-                        ))
+                        yield sse_data(
+                            completion_chunk(
+                                completion_id,
+                                created,
+                                model_id,
+                                {},
+                                stats["finish_reason"],
+                            )
+                        )
                         yield "data: [DONE]\n\n"
 
                 finally:
                     # Generator cleanup must complete even when the HTTP
                     # streaming task is cancelled.
                     with anyio.CancelScope(shield=True):
-                        await anyio.to_thread.run_sync(
-                            stream.close
-                        )
+                        await anyio.to_thread.run_sync(stream.close)
 
                         if completed and session.last_stats is not None:
                             log_context(prepared.context_stats)

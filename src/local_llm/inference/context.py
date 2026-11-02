@@ -50,9 +50,7 @@ def prepare_context(
     Never mutates the input messages.
     """
     if not 0 < max_new_tokens < max_context_tokens:
-        raise ValueError(
-            "Expected 0 < max_new_tokens < max_context_tokens"
-        )
+        raise ValueError("Expected 0 < max_new_tokens < max_context_tokens")
 
     if not messages:
         raise ValueError("Conversation cannot be empty")
@@ -64,15 +62,9 @@ def prepare_context(
         raise ValueError("Last message must have role 'user'")
 
     for i in range(offset, len(messages)):
-        expected_role = (
-            "user" if (i - offset) % 2 == 0
-            else "assistant"
-        )
+        expected_role = "user" if (i - offset) % 2 == 0 else "assistant"
         if messages[i]["role"] != expected_role:
-            raise ValueError(
-                f"Invalid role at index {i}: "
-                f"expected '{expected_role}'"
-            )
+            raise ValueError(f"Invalid role at index {i}: expected '{expected_role}'")
 
     budget = max_context_tokens - max_new_tokens
 
@@ -84,26 +76,19 @@ def prepare_context(
     dropped_turns = 0
 
     # Ensure the minimum possible prompt fits.
-    minimum = (
-        [pending[0], pending[-1]]
-        if offset
-        else [pending[-1]]
-    )
+    minimum = [pending[0], pending[-1]] if offset else [pending[-1]]
 
     if len(tokenize_messages(minimum)) > budget:
         raise ValueError(
-            "System prompt and latest user message "
-            "exceed the context budget"
+            "System prompt and latest user message exceed the context budget"
         )
 
     # Remove oldest complete turns until the prompt fits.
     while len(token_ids) > budget:
         if len(pending) == offset + 1:
-            raise RuntimeError(
-                "Unable to reduce prompt below context budget"
-            )
+            raise RuntimeError("Unable to reduce prompt below context budget")
 
-        del pending[offset: offset + 2]
+        del pending[offset : offset + 2]
         dropped_turns += 1
         token_ids = tokenize_messages(pending)
 
